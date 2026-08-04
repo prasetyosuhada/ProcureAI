@@ -7,6 +7,7 @@ from app.core.database import async_session_maker
 from app.models.user import User
 from app.models.budget import Budget
 from app.models.vendor import Vendor, VendorPrice
+from app.core.security import get_password_hash
 
 async def seed_users(session: AsyncSession):
     # Check if users already exist
@@ -23,13 +24,14 @@ async def seed_users(session: AsyncSession):
         {"email": "manager@procure.ai", "full_name": "Eve Manager", "role": "FINANCE_MANAGER", "department": "Finance"},
     ]
 
+    hashed_password = get_password_hash("password123")
     for data in users_data:
         user = User(
             email=data["email"],
             full_name=data["full_name"],
             role=data["role"],
             department=data["department"],
-            hashed_password="dummy_hashed_password"  # Will be replaced with real hash in Task 2.1
+            hashed_password=hashed_password
         )
         session.add(user)
     
