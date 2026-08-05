@@ -56,6 +56,13 @@ async def setup_test_db():
                 hashed_password=hashed_password,
             ),
             User(
+                email="ap@procure.ai",
+                full_name="Diana AP",
+                role="AP_CLERK",
+                department="Finance",
+                hashed_password=hashed_password,
+            ),
+            User(
                 email="manager@procure.ai",
                 full_name="Eve Manager",
                 role="FINANCE_MANAGER",
