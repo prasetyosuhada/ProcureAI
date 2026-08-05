@@ -10,6 +10,7 @@ from app.core.security import get_password_hash
 from app.models.base import Base
 from app.models.user import User
 from app.models.budget import Budget
+from app.models.vendor import Vendor
 
 # SQLite in-memory database for fast, self-contained testing
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
@@ -48,6 +49,13 @@ async def setup_test_db():
                 hashed_password=hashed_password,
             ),
             User(
+                email="warehouse@procure.ai",
+                full_name="Charlie Warehouse",
+                role="WAREHOUSE_STAFF",
+                department="Operations",
+                hashed_password=hashed_password,
+            ),
+            User(
                 email="manager@procure.ai",
                 full_name="Eve Manager",
                 role="FINANCE_MANAGER",
@@ -66,6 +74,16 @@ async def setup_test_db():
             reserved_amount=Decimal("0.00"),
         )
         session.add(budget)
+
+        vendor = Vendor(
+            vendor_code="VEND-001",
+            name="TechSupply Inc",
+            contact_email="sales@techsupply.com",
+            payment_terms="NET30",
+            is_active=True,
+        )
+        session.add(vendor)
+
         await session.commit()
 
     yield

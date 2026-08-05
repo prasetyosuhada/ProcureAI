@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from app.core.config import settings
-from app.api.v1.endpoints import auth, requisitions
+from app.api.v1.endpoints import auth, requisitions, orders, receipts
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -10,6 +10,8 @@ app = FastAPI(
 
 app.include_router(auth.router, prefix=f"{settings.API_V1_STR}/auth", tags=["Auth"])
 app.include_router(requisitions.router, prefix=f"{settings.API_V1_STR}/requisitions", tags=["Purchase Requisitions"])
+app.include_router(orders.router, prefix=f"{settings.API_V1_STR}/purchase-orders", tags=["Purchase Orders"])
+app.include_router(receipts.router, prefix=f"{settings.API_V1_STR}/goods-receipts", tags=["Goods Receipts"])
 
 @app.get("/health", tags=["System"])
 async def health_check():
