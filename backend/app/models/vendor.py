@@ -1,15 +1,15 @@
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from sqlalchemy import String, Boolean, Numeric, DateTime, ForeignKey
+from sqlalchemy import String, Boolean, Numeric, DateTime, ForeignKey, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from app.models.base import Base
 
 class Vendor(Base):
     __tablename__ = "vendors"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid().with_variant(PG_UUID(as_uuid=True), "postgresql"), primary_key=True, default=uuid.uuid4)
     vendor_code: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     contact_email: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -21,7 +21,7 @@ class Vendor(Base):
 class VendorPrice(Base):
     __tablename__ = "vendor_prices"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid().with_variant(PG_UUID(as_uuid=True), "postgresql"), primary_key=True, default=uuid.uuid4)
     vendor_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("vendors.id", ondelete="CASCADE"), nullable=False, index=True)
     item_category: Mapped[str] = mapped_column(String(100), nullable=False)
     item_name: Mapped[str] = mapped_column(String(255), nullable=False)
