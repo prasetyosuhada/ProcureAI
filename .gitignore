@@ -1,0 +1,32 @@
+# Python / backend
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+.env
+.pytest_cache/
+.ruff_cache/
+alembic.ini
+
+# Node / frontend
+node_modules/
+dist/
+build/
+.npm/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Project specific
+.coverage
+htmlcov/
+*.log
+
+# Workspace
+.dev/
