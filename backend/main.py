@@ -19,6 +19,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from app.api.v1 import api_v1_router
+
+app.include_router(api_v1_router, prefix="/api/v1")
+app.include_router(api_v1_router, prefix="/api")
+
 @app.get("/health", tags=["System"])
 async def health_check():
     """System health check endpoint."""
