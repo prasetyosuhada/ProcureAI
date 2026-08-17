@@ -37,20 +37,29 @@ def extract_requirement_heuristics(user_text: str, current_draft: Dict[str, Any]
 
     # 1. Dynamic Item & Category Extraction (Works for ANY item)
     if not draft.get("item"):
-        # Match 'need/want/buy/order [quantity] <ITEM> for/before/with...'
-        item_match = re.search(
-            r'\b(?:need|want|buy|request|order|purchasing|for)\s+(?:a|an|\d+)?\s*([a-zA-Z0-9\s\-]{2,30}?)(?=\s+(?:for|before|by|with|to|in)\b|$)',
-            text, re.IGNORECASE
-        )
-        if item_match:
-            candidate = item_match.group(1).strip()
-            # Remove leading numbers/words like 'laptops'
-            candidate = re.sub(r'^\d+\s*', '', candidate)
-            if candidate and len(candidate) > 1 and candidate.lower() not in ["the", "a", "an", "some"]:
-                item_title = candidate.title()
-                if item_title.endswith("s") and not item_title.endswith("ss"):
-                    item_title = item_title[:-1]
-                draft["item"] = item_title
+        if "laptop" in text_lower or "macbook" in text_lower or "notebook" in text_lower:
+            draft["item"] = "Laptop"
+        elif "monitor" in text_lower or "screen" in text_lower or "display" in text_lower:
+            draft["item"] = "Monitor"
+        elif "chair" in text_lower or "seating" in text_lower:
+            draft["item"] = "Ergonomic Chair"
+        elif "desk" in text_lower or "table" in text_lower:
+            draft["item"] = "Standing Desk"
+        else:
+            # Match 'need/want/buy/order [quantity] <ITEM> for/before/with...'
+            item_match = re.search(
+                r'\b(?:need|want|buy|request|order|purchasing|for)\s+(?:to\s+buy\s+)?(?:a|an|\$[\d,]+|\d+)?\s*(?:a|an|\$[\d,]+|\d+)?\s*([a-zA-Z0-9\s\-/]{2,35}?)(?=\s+(?:for|before|by|with|to|in|\.)\b|[.,;]|$)',
+                text, re.IGNORECASE
+            )
+            if item_match:
+                candidate = item_match.group(1).strip()
+                candidate = re.sub(r'^(?:\$?\d+[\w,]*\s*)+', '', candidate).strip()
+                candidate = re.sub(r'^(?:new|standard|high-end|refurbished|commercial)\s+', '', candidate, flags=re.IGNORECASE).strip()
+                if candidate and len(candidate) > 1 and candidate.lower() not in ["the", "a", "an", "some", "these", "those"]:
+                    item_title = candidate.title()
+                    if item_title.endswith("s") and not item_title.endswith("ss"):
+                        item_title = item_title[:-1]
+                    draft["item"] = item_title
 
     # Default category resolution using get_categories tool
     if draft.get("item") and not draft.get("category"):
