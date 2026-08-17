@@ -1,14 +1,15 @@
 import React from 'react';
-import { Bot, Sparkles, Building2, User, CheckCircle2, Clock } from 'lucide-react';
+import { Bot, Sparkles, Building2, User, CheckCircle2, Clock, PlusCircle } from 'lucide-react';
 import { UserContext } from '../types/chat';
 
 interface NavbarProps {
   userContext: UserContext;
   currentPhase: 'Clarification' | 'Demand' | 'GeneratePR' | 'Completed';
   threadId: string;
+  onResetThread?: () => void;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({ userContext, currentPhase, threadId }) => {
+export const Navbar: React.FC<NavbarProps> = ({ userContext, currentPhase, threadId, onResetThread }) => {
   const getPhaseBadge = () => {
     switch (currentPhase) {
       case 'Clarification':
@@ -68,8 +69,19 @@ export const Navbar: React.FC<NavbarProps> = ({ userContext, currentPhase, threa
           {getPhaseBadge()}
         </div>
 
-        {/* User Context & Meta Badges */}
+        {/* Actions & User Context */}
         <div className="flex items-center gap-3">
+          {onResetThread && (
+            <button
+              onClick={onResetThread}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 text-xs font-medium text-slate-300 hover:text-white transition-all shadow-sm active:scale-95"
+              title="Start a new procurement conversation"
+            >
+              <PlusCircle className="w-3.5 h-3.5 text-indigo-400" />
+              <span className="hidden sm:inline">New Thread</span>
+            </button>
+          )}
+
           <div className="hidden sm:flex flex-col items-end text-right text-xs">
             <div className="flex items-center gap-1 text-slate-200 font-medium">
               <User className="w-3.5 h-3.5 text-indigo-400" />
