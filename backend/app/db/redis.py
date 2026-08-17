@@ -21,8 +21,6 @@ async def check_redis_connection() -> bool:
         logger.error(f"Redis connection failed: {e}")
         return False
 
-async def get_redis_checkpointer():
-    """Initialize and return an AsyncRedisSaver for LangGraph state checkpointing."""
-    # AsyncRedisSaver connects to REDIS_URL for checkpointing threads
-    saver = AsyncRedisSaver.from_conn_info(host="localhost", port=6379)
-    return saver
+def get_redis_checkpointer():
+    """Initialize and return an AsyncRedisSaver context manager for LangGraph state checkpointing."""
+    return AsyncRedisSaver.from_conn_string(settings.REDIS_URL)
