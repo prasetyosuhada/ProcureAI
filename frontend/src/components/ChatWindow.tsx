@@ -1,6 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import { Bot, Sparkles, ShieldCheck, ArrowRight } from 'lucide-react';
-import { ChatMessage, RequirementDraft } from '../types/chat';
+import { ChatMessage, RequirementDraft, PRDraft } from '../types/chat';
 import { ChatMessageBubble } from './ChatMessageBubble';
 import { TypingIndicator } from './TypingIndicator';
 
@@ -11,6 +11,8 @@ interface ChatWindowProps {
   onEditRequirement?: (updatedDraft: Partial<RequirementDraft>) => void;
   onAcceptDemand?: () => void;
   onRequestOriginalDemand?: () => void;
+  onOpenPRReview?: (draft: PRDraft) => void;
+  onSubmitPRDirect?: (draft: PRDraft) => void;
 }
 
 export const ChatWindow: React.FC<ChatWindowProps> = ({
@@ -20,6 +22,8 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   onEditRequirement,
   onAcceptDemand,
   onRequestOriginalDemand,
+  onOpenPRReview,
+  onSubmitPRDirect,
 }) => {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -84,6 +88,8 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 onEditRequirement={isLastMessage ? onEditRequirement : undefined}
                 onAcceptDemand={isLastMessage ? onAcceptDemand : undefined}
                 onRequestOriginalDemand={isLastMessage ? onRequestOriginalDemand : undefined}
+                onOpenPRReview={onOpenPRReview}
+                onSubmitPRDirect={onSubmitPRDirect}
               />
             );
           })}

@@ -1,8 +1,9 @@
 import React from 'react';
 import { User, Bot, Sparkles, CheckCheck } from 'lucide-react';
-import { ChatMessage, RequirementDraft } from '../types/chat';
+import { ChatMessage, RequirementDraft, PRDraft } from '../types/chat';
 import { RequirementDraftCard } from './RequirementDraftCard';
 import { DemandAnalysisCard } from './DemandAnalysisCard';
+import { PRDraftCard } from './PRDraftCard';
 
 interface ChatMessageBubbleProps {
   message: ChatMessage;
@@ -10,6 +11,8 @@ interface ChatMessageBubbleProps {
   onEditRequirement?: (updatedDraft: Partial<RequirementDraft>) => void;
   onAcceptDemand?: () => void;
   onRequestOriginalDemand?: () => void;
+  onOpenPRReview?: (draft: PRDraft) => void;
+  onSubmitPRDirect?: (draft: PRDraft) => void;
 }
 
 export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
@@ -18,6 +21,8 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
   onEditRequirement,
   onAcceptDemand,
   onRequestOriginalDemand,
+  onOpenPRReview,
+  onSubmitPRDirect,
 }) => {
   const isUser = message.role === 'user';
 
@@ -124,6 +129,15 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
             analysis={message.demandAnalysis}
             onAccept={onAcceptDemand}
             onRequestOriginal={onRequestOriginalDemand}
+          />
+        )}
+
+        {/* Interactive Widget 3: PR Draft Ready Card */}
+        {message.prDraft && (
+          <PRDraftCard
+            prDraft={message.prDraft}
+            onOpenReview={() => onOpenPRReview && onOpenPRReview(message.prDraft!)}
+            onSubmitDirect={() => onSubmitPRDirect && onSubmitPRDirect(message.prDraft!)}
           />
         )}
 

@@ -8,6 +8,7 @@ export interface ChatMessage {
   agentName?: string;
   requirementDraft?: RequirementDraft | null;
   demandAnalysis?: DemandAnalysis | null;
+  prDraft?: PRDraft | null;
 }
 
 export interface RequirementDraft {
@@ -39,6 +40,8 @@ export interface PRDraft {
   required_date: string;
   business_justification: string;
   demand_analysis_summary: string;
+  status?: 'DRAFT' | 'SUBMITTED' | string;
+  created_at?: string;
 }
 
 export interface UserContext {

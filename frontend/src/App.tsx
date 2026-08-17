@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Navbar } from './components/Navbar';
 import { ChatWindow } from './components/ChatWindow';
 import { ChatInput } from './components/ChatInput';
+import { PRDraftReviewModal } from './components/PRDraftReviewModal';
 import { ChatMessage, UserContext, RequirementDraft, DemandAnalysis, PRDraft } from './types/chat';
 import { chatApi } from './api/chatApi';
 
@@ -14,7 +15,8 @@ export const App: React.FC = () => {
   const [currentPhase, setCurrentPhase] = useState<'Clarification' | 'Demand' | 'GeneratePR' | 'Completed'>('Clarification');
   const [requirementDraft, setRequirementDraft] = useState<RequirementDraft | null>(null);
   const [demandAnalysis, setDemandAnalysis] = useState<DemandAnalysis | null>(null);
-  const [, setPrDraft] = useState<PRDraft | null>(null);
+  const [prDraft, setPrDraft] = useState<PRDraft | null>(null);
+  const [isReviewModalOpen, setIsReviewModalOpen] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Authenticated user context
@@ -79,11 +81,33 @@ export const App: React.FC = () => {
         }
       }
 
-      const reqDraft = response.requirement_draft || null;
-      const demAnalysis = response.demand_analysis || null;
+      const reqDraft = response.requirement_draft || requirementDraft || null;
+      const demAnalysis = response.demand_analysis || demandAnalysis || null;
       if (reqDraft) setRequirementDraft(reqDraft);
       if (demAnalysis) setDemandAnalysis(demAnalysis);
-      if (response.pr_draft) setPrDraft(response.pr_draft);
+
+      // Create or populate PR Draft when ready
+      let generatedPR: PRDraft | null = response.pr_draft || null;
+      if (!generatedPR && response.next_agent === 'GeneratePR' && reqDraft && demAnalysis) {
+        const prNumber = `PR-${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${Math.floor(1000 + Math.random() * 9000)}`;
+        generatedPR = {
+          pr_number: prNumber,
+          category: reqDraft.category || 'General Procurement',
+          item: reqDraft.item || 'Procured Goods',
+          quantity: demAnalysis.recommended_quantity ?? reqDraft.quantity ?? 1,
+          specifications: reqDraft.specifications || {},
+          purpose: reqDraft.purpose || 'Internal Operations',
+          required_date: reqDraft.required_date || new Date().toISOString().split('T')[0],
+          business_justification: demAnalysis.justification || `Procurement for ${reqDraft.purpose}`,
+          demand_analysis_summary: `Requested: ${demAnalysis.requested_quantity || reqDraft.quantity}, Stock: ${demAnalysis.available_inventory || 0}, Assets: ${demAnalysis.available_assets || 0}, Net Buy: ${demAnalysis.recommended_quantity ?? reqDraft.quantity}`,
+          status: 'DRAFT',
+          created_at: new Date().toISOString()
+        };
+      }
+
+      if (generatedPR) {
+        setPrDraft(generatedPR);
+      }
 
       // Append Agent response message with interactive payload
       const assistantMessage: ChatMessage = {
@@ -95,7 +119,8 @@ export const App: React.FC = () => {
           ? 'Demand Analysis Agent'
           : 'Clarification Agent',
         requirementDraft: reqDraft,
-        demandAnalysis: demAnalysis
+        demandAnalysis: demAnalysis,
+        prDraft: generatedPR
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
@@ -138,6 +163,40 @@ export const App: React.FC = () => {
     handleSendMessage(`I request to proceed with the original requested quantity of ${original} units due to upcoming dedicated department requirements.`);
   };
 
+  const handleOpenPRReview = (draft?: PRDraft) => {
+    if (draft) setPrDraft(draft);
+    setIsReviewModalOpen(true);
+  };
+
+  const handleSavePR = (updatedPR: PRDraft) => {
+    setPrDraft(updatedPR);
+    setIsReviewModalOpen(false);
+    const confirmationMsg: ChatMessage = {
+      id: `msg_${Date.now()}_system`,
+      role: 'assistant',
+      content: `✅ **Purchase Requisition ${updatedPR.pr_number} Updated**\n\n• **Item:** ${updatedPR.item}\n• **Quantity:** ${updatedPR.quantity} units\n• **Required Date:** ${updatedPR.required_date}\n\nYour changes have been saved to the PR draft. Click below to submit when ready.`,
+      timestamp: new Date().toISOString(),
+      agentName: 'ProcureAI System',
+      prDraft: updatedPR
+    };
+    setMessages((prev) => [...prev, confirmationMsg]);
+  };
+
+  const handleSubmitPR = (finalPR: PRDraft) => {
+    setPrDraft(finalPR);
+    setIsReviewModalOpen(false);
+    setCurrentPhase('Completed');
+    const successMsg: ChatMessage = {
+      id: `msg_${Date.now()}_system`,
+      role: 'assistant',
+      content: `🎉 **Purchase Requisition Submitted Successfully!**\n\n• **PR Number:** \`${finalPR.pr_number}\`\n• **Item & Quantity:** ${finalPR.quantity}x ${finalPR.item}\n• **Department:** ${userContext.departmentId}\n• **Status:** \`SUBMITTED - Awaiting Manager Approval\`\n\nYour Purchase Requisition is now logged into the ERP approval queue.`,
+      timestamp: new Date().toISOString(),
+      agentName: 'ProcureAI System',
+      prDraft: finalPR
+    };
+    setMessages((prev) => [...prev, successMsg]);
+  };
+
   const handleResetThread = () => {
     const newThread = `thread_${Math.random().toString(36).substring(2, 11)}`;
     setThreadId(newThread);
@@ -146,6 +205,7 @@ export const App: React.FC = () => {
     setDemandAnalysis(null);
     setPrDraft(null);
     setCurrentPhase('Clarification');
+    setIsReviewModalOpen(false);
     setErrorMessage(null);
   };
 
@@ -173,9 +233,23 @@ export const App: React.FC = () => {
           onEditRequirement={handleEditRequirement}
           onAcceptDemand={handleAcceptDemand}
           onRequestOriginalDemand={handleRequestOriginalDemand}
+          onOpenPRReview={handleOpenPRReview}
+          onSubmitPRDirect={(draft) => handleSubmitPR({ ...draft, status: 'SUBMITTED' })}
         />
         <ChatInput onSendMessage={handleSendMessage} isLoading={isLoading} />
       </main>
+
+      {/* PR Draft Review & Edit Modal */}
+      {prDraft && (
+        <PRDraftReviewModal
+          isOpen={isReviewModalOpen}
+          onClose={() => setIsReviewModalOpen(false)}
+          prDraft={prDraft}
+          userContext={userContext}
+          onSavePR={handleSavePR}
+          onSubmitPR={handleSubmitPR}
+        />
+      )}
     </div>
   );
 };
