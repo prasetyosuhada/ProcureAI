@@ -6,6 +6,8 @@ export interface ChatMessage {
   content: string;
   timestamp: string;
   agentName?: string;
+  requirementDraft?: RequirementDraft | null;
+  demandAnalysis?: DemandAnalysis | null;
 }
 
 export interface RequirementDraft {

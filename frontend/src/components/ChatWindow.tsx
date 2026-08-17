@@ -1,15 +1,26 @@
 import React, { useRef, useEffect } from 'react';
 import { Bot, Sparkles, ShieldCheck, ArrowRight } from 'lucide-react';
-import { ChatMessage } from '../types/chat';
+import { ChatMessage, RequirementDraft } from '../types/chat';
 import { ChatMessageBubble } from './ChatMessageBubble';
 import { TypingIndicator } from './TypingIndicator';
 
 interface ChatWindowProps {
   messages: ChatMessage[];
   isLoading: boolean;
+  onConfirmRequirement?: () => void;
+  onEditRequirement?: (updatedDraft: Partial<RequirementDraft>) => void;
+  onAcceptDemand?: () => void;
+  onRequestOriginalDemand?: () => void;
 }
 
-export const ChatWindow: React.FC<ChatWindowProps> = ({ messages, isLoading }) => {
+export const ChatWindow: React.FC<ChatWindowProps> = ({
+  messages,
+  isLoading,
+  onConfirmRequirement,
+  onEditRequirement,
+  onAcceptDemand,
+  onRequestOriginalDemand,
+}) => {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -63,9 +74,19 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ messages, isLoading }) =
       ) : (
         /* Conversation Stream */
         <div className="space-y-1">
-          {messages.map((msg) => (
-            <ChatMessageBubble key={msg.id} message={msg} />
-          ))}
+          {messages.map((msg, idx) => {
+            const isLastMessage = idx === messages.length - 1;
+            return (
+              <ChatMessageBubble
+                key={msg.id}
+                message={msg}
+                onConfirmRequirement={isLastMessage ? onConfirmRequirement : undefined}
+                onEditRequirement={isLastMessage ? onEditRequirement : undefined}
+                onAcceptDemand={isLastMessage ? onAcceptDemand : undefined}
+                onRequestOriginalDemand={isLastMessage ? onRequestOriginalDemand : undefined}
+              />
+            );
+          })}
           {isLoading && <TypingIndicator />}
           <div ref={bottomRef} />
         </div>

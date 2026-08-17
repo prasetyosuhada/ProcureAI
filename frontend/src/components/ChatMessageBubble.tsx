@@ -1,12 +1,24 @@
 import React from 'react';
 import { User, Bot, Sparkles, CheckCheck } from 'lucide-react';
-import { ChatMessage } from '../types/chat';
+import { ChatMessage, RequirementDraft } from '../types/chat';
+import { RequirementDraftCard } from './RequirementDraftCard';
+import { DemandAnalysisCard } from './DemandAnalysisCard';
 
 interface ChatMessageBubbleProps {
   message: ChatMessage;
+  onConfirmRequirement?: () => void;
+  onEditRequirement?: (updatedDraft: Partial<RequirementDraft>) => void;
+  onAcceptDemand?: () => void;
+  onRequestOriginalDemand?: () => void;
 }
 
-export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({ message }) => {
+export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
+  message,
+  onConfirmRequirement,
+  onEditRequirement,
+  onAcceptDemand,
+  onRequestOriginalDemand,
+}) => {
   const isUser = message.role === 'user';
 
   // Simple clean formatting for markdown bold and bullet points
@@ -71,7 +83,7 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({ message })
 
       {/* Message Bubble Container */}
       <div
-        className={`max-w-[85%] sm:max-w-[75%] rounded-2xl px-4 py-3 shadow-lg ${
+        className={`max-w-[90%] sm:max-w-[80%] rounded-2xl px-4 py-3 shadow-lg ${
           isUser
             ? 'bg-indigo-600 text-white rounded-tr-sm'
             : 'glass-card border border-slate-700/60 rounded-tl-sm'
@@ -92,10 +104,28 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({ message })
           </span>
         </div>
 
-        {/* Message Content */}
+        {/* Message Text Content */}
         <div className="text-sm font-normal">
           {formatContent(message.content)}
         </div>
+
+        {/* Interactive Widget 1: Requirement Draft Card */}
+        {message.requirementDraft && (
+          <RequirementDraftCard
+            draft={message.requirementDraft}
+            onConfirm={onConfirmRequirement}
+            onEdit={onEditRequirement}
+          />
+        )}
+
+        {/* Interactive Widget 2: Demand Analysis Optimization Card */}
+        {message.demandAnalysis && (
+          <DemandAnalysisCard
+            analysis={message.demandAnalysis}
+            onAccept={onAcceptDemand}
+            onRequestOriginal={onRequestOriginalDemand}
+          />
+        )}
 
         {/* Read Receipt Icon for User */}
         {isUser && (
