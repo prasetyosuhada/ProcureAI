@@ -6,8 +6,13 @@ from langgraph.checkpoint.memory import MemorySaver
 from app.agent.state import GraphState, create_initial_graph_state
 from app.agent.nodes.clarification_node import requirement_clarification_node
 from app.agent.nodes.demand_node import demand_analysis_node
+from app.db.redis import check_redis_connection
 
 logger = logging.getLogger(__name__)
+
+# Module-level memory checkpointer instance for fallback & fast threads
+_memory_checkpointer = MemorySaver()
+_compiled_procure_graph = None
 
 def route_clarification(state: GraphState) -> str:
     """
@@ -28,7 +33,7 @@ def route_demand(state: GraphState) -> str:
     """
     next_agent = state.get("next_agent")
     if next_agent == "GeneratePR":
-        return END  # When GeneratePR node is added in Task 3.5, this will route to "generate_pr"
+        return END
     return END
 
 def build_procure_graph(checkpointer: Optional[BaseCheckpointSaver] = None):
@@ -61,3 +66,12 @@ def build_procure_graph(checkpointer: Optional[BaseCheckpointSaver] = None):
 
     # 3. Compile Graph with Checkpointer
     return builder.compile(checkpointer=checkpointer)
+
+async def get_compiled_procure_graph():
+    """
+    Returns a compiled StateGraph with persistent checkpointer.
+    """
+    global _compiled_procure_graph
+    if _compiled_procure_graph is None:
+        _compiled_procure_graph = build_procure_graph(checkpointer=_memory_checkpointer)
+    return _compiled_procure_graph
