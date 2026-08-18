@@ -1,14 +1,133 @@
 import asyncio
 import logging
-from sqlalchemy import select, delete
+from sqlalchemy import delete
 from app.db.session import AsyncSessionLocal
 from app.models.inventory import Inventory
 from app.models.asset import Asset
 from app.models.pipeline_order import PipelineOrder
 from app.models.purchase_history import PurchaseHistory
 from app.models.budget import Budget
+from app.models.procurement_category import ProcurementCategory
+from app.models.standard_specification import StandardSpecification
+from app.models.procurement_policy import ProcurementPolicy
 
 logger = logging.getLogger(__name__)
+
+INITIAL_CATEGORIES = [
+    {"category_id": "IT-HW-01", "category_name": "IT Equipment > Laptops", "keywords": ["laptop", "notebook", "macbook", "computer"]},
+    {"category_id": "IT-HW-02", "category_name": "IT Equipment > Monitors", "keywords": ["monitor", "display", "screen"]},
+    {"category_id": "IT-HW-03", "category_name": "IT Equipment > Peripherals", "keywords": ["keyboard", "mouse", "dock", "hub", "adapter"]},
+    {"category_id": "OF-FURN-01", "category_name": "Office Furniture > Ergonomic Chairs", "keywords": ["chair", "seating", "desk chair"]},
+    {"category_id": "OF-FURN-02", "category_name": "Office Furniture > Desks", "keywords": ["desk", "table", "standing desk"]},
+    {"category_id": "SW-LIC-01", "category_name": "Software > Developer Tools", "keywords": ["ide", "software", "license", "jetbrains", "docker"]},
+]
+
+INITIAL_SPECS = [
+    {
+        "category_id": "IT-HW-01",
+        "item_name": "Laptop",
+        "standard_models": [
+            {
+                "model_name": "Standard Developer Laptop",
+                "recommended_for": ["Backend Developer", "Frontend Developer", "Data Engineer", "DevOps"],
+                "specs": {
+                    "processor": "Intel i7 / Apple M-series Pro",
+                    "ram": "32GB",
+                    "storage": "1TB SSD",
+                    "os": "macOS / Linux / Windows 11 Pro"
+                }
+            },
+            {
+                "model_name": "Standard Business Laptop",
+                "recommended_for": ["General Staff", "Finance", "HR", "Sales", "Operations"],
+                "specs": {
+                    "processor": "Intel i5 / Apple M-series Base",
+                    "ram": "16GB",
+                    "storage": "512GB SSD",
+                    "os": "Windows 11 Pro"
+                }
+            }
+        ]
+    },
+    {
+        "category_id": "IT-HW-02",
+        "item_name": "Monitor",
+        "standard_models": [
+            {
+                "model_name": "Standard 27-inch 4K Monitor",
+                "recommended_for": ["Designer", "Developer", "General"],
+                "specs": {
+                    "resolution": "3840x2160 (4K)",
+                    "size": "27 inch",
+                    "connectivity": "USB-C with Power Delivery, HDMI, DisplayPort"
+                }
+            }
+        ]
+    },
+    {
+        "category_id": "OF-FURN-01",
+        "item_name": "Ergonomic Chair",
+        "standard_models": [
+            {
+                "model_name": "Ergonomic Mesh Task Chair",
+                "recommended_for": ["All Employees"],
+                "specs": {
+                    "lumbar_support": "Adjustable",
+                    "armrests": "3D Adjustable",
+                    "weight_capacity": "136 kg"
+                }
+            }
+        ]
+    },
+    {
+        "category_id": "OF-FURN-02",
+        "item_name": "Standing Desk",
+        "standard_models": [
+            {
+                "model_name": "Electric Dual-Motor Standing Desk",
+                "recommended_for": ["All Employees"],
+                "specs": {
+                    "height_range": "62cm - 128cm",
+                    "dimensions": "140cm x 70cm",
+                    "weight_capacity": "100 kg"
+                }
+            }
+        ]
+    }
+]
+
+INITIAL_POLICIES = [
+    {
+        "policy_key": "laptop",
+        "item_category": "IT Hardware",
+        "policy_text": "All IT hardware requests require IT Department validation. Standard developer laptops are configured with 32GB RAM for local Docker execution. Purchase value above $2,000 requires VP/Department Head approval.",
+        "approval_rules": {"requires_it_approval": True, "requires_facilities_approval": False, "threshold_mid": 2000, "threshold_high": 5000}
+    },
+    {
+        "policy_key": "monitor",
+        "item_category": "IT Hardware",
+        "policy_text": "Maximum 2 external monitors allowed per employee. Standard specification is 27-inch 4K USB-C.",
+        "approval_rules": {"requires_it_approval": True, "requires_facilities_approval": False, "threshold_mid": 2000, "threshold_high": 5000}
+    },
+    {
+        "policy_key": "chair",
+        "item_category": "Office Furniture",
+        "policy_text": "Ergonomic furniture requests must be fulfilled from existing warehouse assets if available. Purchases require Facilities approval.",
+        "approval_rules": {"requires_it_approval": False, "requires_facilities_approval": True, "threshold_mid": 2000, "threshold_high": 5000}
+    },
+    {
+        "policy_key": "desk",
+        "item_category": "Office Furniture",
+        "policy_text": "Standing desks require Facilities review and ergonomic workstation justification. Standard size is 140x70cm dual-motor.",
+        "approval_rules": {"requires_it_approval": False, "requires_facilities_approval": True, "threshold_mid": 2000, "threshold_high": 5000}
+    },
+    {
+        "policy_key": "general",
+        "item_category": "General",
+        "policy_text": "All purchase requisitions must be justified with a business purpose and target completion date. Orders above $5,000 require competitive finance review.",
+        "approval_rules": {"requires_it_approval": False, "requires_facilities_approval": False, "threshold_mid": 2000, "threshold_high": 5000}
+    }
+]
 
 INITIAL_INVENTORY = [
     {"item_name": "Laptop", "category_id": "IT-HW-01", "available_quantity": 3, "location": "IT Store Room A", "condition": "Unopened Box"},
@@ -130,34 +249,49 @@ INITIAL_BUDGETS = [
 ]
 
 async def seed_enterprise_data():
-    """Seeds default enterprise data into PostgreSQL database."""
+    """Seeds comprehensive enterprise data into PostgreSQL database."""
     print("🌱 Seeding Enterprise Data into PostgreSQL...")
     async with AsyncSessionLocal() as session:
         async with session.begin():
             # 1. Clean existing records for idempotent seeding
+            await session.execute(delete(ProcurementCategory))
+            await session.execute(delete(StandardSpecification))
+            await session.execute(delete(ProcurementPolicy))
             await session.execute(delete(Inventory))
             await session.execute(delete(Asset))
             await session.execute(delete(PipelineOrder))
             await session.execute(delete(PurchaseHistory))
             await session.execute(delete(Budget))
 
-            # 2. Insert Inventory
+            # 2. Insert Categories
+            for cat in INITIAL_CATEGORIES:
+                session.add(ProcurementCategory(**cat))
+
+            # 3. Insert Specs
+            for spec in INITIAL_SPECS:
+                session.add(StandardSpecification(**spec))
+
+            # 4. Insert Policies
+            for pol in INITIAL_POLICIES:
+                session.add(ProcurementPolicy(**pol))
+
+            # 5. Insert Inventory
             for inv in INITIAL_INVENTORY:
                 session.add(Inventory(**inv))
 
-            # 3. Insert Assets
+            # 6. Insert Assets
             for ast in INITIAL_ASSETS:
                 session.add(Asset(**ast))
 
-            # 4. Insert Pipeline Orders
+            # 7. Insert Pipeline Orders
             for pipe in INITIAL_PIPELINE:
                 session.add(PipelineOrder(**pipe))
 
-            # 5. Insert Purchase History
+            # 8. Insert Purchase History
             for hist in INITIAL_PURCHASE_HISTORY:
                 session.add(PurchaseHistory(**hist))
 
-            # 6. Insert Budgets
+            # 9. Insert Budgets
             for budg in INITIAL_BUDGETS:
                 session.add(Budget(**budg))
 

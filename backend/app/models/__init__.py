@@ -6,6 +6,9 @@ from app.models.asset import Asset
 from app.models.pipeline_order import PipelineOrder
 from app.models.purchase_history import PurchaseHistory
 from app.models.budget import Budget
+from app.models.procurement_category import ProcurementCategory
+from app.models.standard_specification import StandardSpecification
+from app.models.procurement_policy import ProcurementPolicy
 
 __all__ = [
     "Base",
@@ -15,5 +18,8 @@ __all__ = [
     "Asset",
     "PipelineOrder",
     "PurchaseHistory",
-    "Budget"
+    "Budget",
+    "ProcurementCategory",
+    "StandardSpecification",
+    "ProcurementPolicy"
 ]
