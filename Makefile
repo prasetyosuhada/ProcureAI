@@ -1,4 +1,4 @@
-.PHONY: help install install-backend install-frontend up down logs dev-backend dev-frontend migrate db-reset test test-verbose eval build-frontend check clean
+.PHONY: help install install-backend install-frontend up down logs dev-backend dev-frontend migrate seed db-reset test test-verbose eval build-frontend check clean
 
 # Colors for terminal output
 CYAN := \033[36m
@@ -41,20 +41,26 @@ logs: ## View live Docker container logs
 	docker compose logs -f
 
 # ==========================================
-# 🗄️ Database Migrations & Reset
+# 🗄️ Database Migrations, Seeding & Reset
 # ==========================================
 migrate: ## Run Alembic database migrations
 	@echo "$(GREEN)Applying database migrations...$(RESET)"
 	cd backend && uv run alembic upgrade head
 
-db-reset: ## Reset database volumes and re-apply migrations
+seed: ## Seed enterprise data into database (inventory, assets, budgets, pipeline)
+	@echo "$(GREEN)Seeding enterprise dataset into PostgreSQL...$(RESET)"
+	cd backend && uv run python -m app.db.seed
+
+db-reset: ## Reset database volumes, apply migrations and seed data
 	@echo "$(YELLOW)Resetting database volumes and starting fresh containers...$(RESET)"
 	docker compose down -v
 	docker compose up -d
 	@sleep 2
 	@echo "$(GREEN)Applying migrations...$(RESET)"
 	cd backend && uv run alembic upgrade head
-	@echo "$(GREEN)Database reset completed!$(RESET)"
+	@echo "$(GREEN)Seeding enterprise data...$(RESET)"
+	cd backend && uv run python -m app.db.seed
+	@echo "$(GREEN)Database reset and seeded successfully!$(RESET)"
 
 # ==========================================
 # 🚀 Development Servers

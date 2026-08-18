@@ -1,6 +1,8 @@
 import asyncio
 from langchain_core.messages import HumanMessage
-from app.agent.graph import get_compiled_procure_graph
+from langgraph.checkpoint.memory import MemorySaver
+from app.agent.graph import build_procure_graph
+from app.agent.state import create_initial_graph_state
 from app.eval.dataset import GOLDEN_DATASET
 from app.eval.evaluator import evaluate_with_llm_judge
 
@@ -12,17 +14,16 @@ async def run_evaluation_suite():
     print("🚀 PROCUREAI AUTOMATED EVALUATION SUITE (LLM-AS-A-JUDGE & DETERMINISTIC)")
     print("="*80 + "\n")
 
-    graph = await get_compiled_procure_graph()
+    checkpointer = MemorySaver()
+    graph = build_procure_graph(checkpointer=checkpointer)
     results = []
 
     for idx, scenario in enumerate(GOLDEN_DATASET, 1):
         print(f"[{idx}/5] Evaluating: {scenario.name} ({scenario.id})...")
         config = {"configurable": {"thread_id": f"eval_thread_{scenario.id}"}}
 
-        input_state = {
-            "messages": [HumanMessage(content=scenario.user_input)],
-            "user_context": scenario.user_context
-        }
+        input_state = create_initial_graph_state(scenario.user_context)
+        input_state["messages"] = [HumanMessage(content=scenario.user_input)]
 
         output_state = await graph.ainvoke(input_state, config=config)
 

@@ -106,7 +106,7 @@ async def demand_analysis_node(state: GraphState) -> Dict[str, Any]:
     if settings.GEMINI_API_KEY and settings.GEMINI_API_KEY != "your_gemini_api_key_here":
         try:
             llm = ChatGoogleGenerativeAI(
-                model="gemini-1.5-flash",
+                model="gemini-3.1-flash-lite",
                 google_api_key=settings.GEMINI_API_KEY,
                 temperature=0.1
             )
