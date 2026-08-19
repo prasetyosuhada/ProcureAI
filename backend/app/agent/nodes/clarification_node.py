@@ -13,13 +13,37 @@ logger = logging.getLogger(__name__)
 
 CLARIFICATION_TOOLS = [get_categories, get_specifications, get_procurement_policy]
 
+def extract_text_from_content(content: Any) -> str:
+    """Safely extracts clean plain text from LangChain message content (handles str, list of dicts, or nested blocks)."""
+    if isinstance(content, str):
+        return content.strip()
+    elif isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                if "text" in block:
+                    parts.append(str(block["text"]))
+                elif "content" in block:
+                    parts.append(str(block["content"]))
+            elif hasattr(block, "text"):
+                parts.append(str(block.text))
+        return "\n".join(parts).strip()
+    elif isinstance(content, dict):
+        if "text" in content:
+            return str(content["text"]).strip()
+        elif "content" in content:
+            return str(content["content"]).strip()
+    return str(content).strip()
+
 def get_last_user_message(messages: Sequence[BaseMessage]) -> str:
     """Extract the text content of the latest human message from conversation history."""
     for msg in reversed(messages):
         if hasattr(msg, "type") and msg.type == "human":
-            return str(msg.content)
+            return extract_text_from_content(msg.content)
         elif hasattr(msg, "content") and not getattr(msg, "role", None) == "assistant":
-            return str(msg.content)
+            return extract_text_from_content(msg.content)
     return ""
 
 def extract_requirement_heuristics(user_text: str, current_draft: Dict[str, Any]) -> Dict[str, Any]:
@@ -158,6 +182,8 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
 
     updated_draft = dict(current_draft)
 
+    llm_response_text: str | None = None
+
     # Invoke Gemini LLM if API Key is configured
     if settings.GEMINI_API_KEY and settings.GEMINI_API_KEY != "your_gemini_api_key_here":
         try:
@@ -166,10 +192,12 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
                 google_api_key=settings.GEMINI_API_KEY,
                 temperature=0.1
             )
+            # --- Pass 1: Structured extraction ---
             structured_llm = llm.with_structured_output(RequirementDraftSchema)
             prompt_messages = [SystemMessage(content=system_prompt)] + list(messages)
             llm_result: RequirementDraftSchema = await structured_llm.ainvoke(prompt_messages)
-            
+            print("LLM Structured:\n", llm_result)
+
             extracted_dict = llm_result.model_dump()
             for k, v in extracted_dict.items():
                 if v:
@@ -179,15 +207,69 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
             updated_draft = extract_requirement_heuristics(last_user_message, current_draft)
     else:
         updated_draft = extract_requirement_heuristics(last_user_message, current_draft)
+    print("Updated Draft:\n", updated_draft)
 
-    # Determine response text and next routing step
-    if updated_draft.get("is_complete"):
+    # Determine next routing step based on completeness
+    next_step = "Demand" if updated_draft.get("is_complete") else "Clarification"
+
+    # --- Pass 2: Generate natural language response via LLM ---
+    if settings.GEMINI_API_KEY and settings.GEMINI_API_KEY != "your_gemini_api_key_here":
+        try:
+            llm = ChatGoogleGenerativeAI(
+                model="gemini-3.1-flash-lite",
+                google_api_key=settings.GEMINI_API_KEY,
+                temperature=0.7
+            )
+
+            missing_fields = []
+            if not updated_draft.get("item"):
+                missing_fields.append("item")
+            if not updated_draft.get("quantity") or updated_draft.get("quantity", 0) <= 0:
+                missing_fields.append("quantity")
+            if not updated_draft.get("purpose"):
+                missing_fields.append("purpose")
+            if not updated_draft.get("required_date"):
+                missing_fields.append("required_date")
+
+            if next_step == "Demand":
+                response_instruction = (
+                    "The user's requirement is now complete. "
+                    "Write a warm, natural confirmation message summarizing what you've captured — "
+                    "item, category, quantity, purpose, specifications, and required date — "
+                    "and mention that you are proceeding to Demand Analysis to check warehouse stock and organizational assets. "
+                    "Write it conversationally and naturally."
+                )
+            else:
+                response_instruction = (
+                    f"The following fields are still missing or unclear: {', '.join(missing_fields)}. "
+                    "Ask the user ONE focused, friendly question to gather the most important missing detail. "
+                    "Do NOT list all missing fields at once. Be natural and concise."
+                )
+
+            draft_summary = str(updated_draft)
+            response_prompt = [
+                SystemMessage(content=(
+                    f"{system_prompt}\n\n"
+                    f"Current requirement draft: {draft_summary}\n\n"
+                    f"Your task now: {response_instruction}"
+                ))
+            ] + list(messages)
+
+            llm_response = await llm.ainvoke(response_prompt)
+            llm_response_text = extract_text_from_content(llm_response.content)
+        except Exception as e:
+            logger.warning(f"Gemini LLM response generation failed, using fallback: {e}")
+            llm_response_text = None
+
+    # Fallback to simple template if LLM response generation failed
+    if llm_response_text:
+        response_content = llm_response_text
+    elif next_step == "Demand":
         item = updated_draft.get("item", "Item")
         qty = updated_draft.get("quantity", 1)
         purpose = updated_draft.get("purpose", "General")
         req_date = updated_draft.get("required_date", "TBD")
         specs_str = ", ".join([f"{k}: {v}" for k, v in updated_draft.get("specifications", {}).items()]) or "Standard"
-
         response_content = (
             f"Thank you! I have recorded your finalized requirement:\n\n"
             f"• **Item:** {item}\n"
@@ -198,26 +280,12 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
             f"• **Required Date:** {req_date}\n\n"
             f"Proceeding to Demand Analysis to check warehouse stock and organizational assets..."
         )
-        next_step = "Demand"
     else:
-        # Formulate targeted clarification questions
-        missing_fields = []
-        if not updated_draft.get("item"):
-            missing_fields.append("what item you need to purchase")
-        if not updated_draft.get("quantity") or updated_draft.get("quantity", 0) <= 0:
-            missing_fields.append("how many units are needed")
-        if not updated_draft.get("purpose"):
-            missing_fields.append("what workload or team will be using them")
-        if not updated_draft.get("required_date"):
-            missing_fields.append("when you need them delivered")
-
-        question = f"Could you please clarify {missing_fields[0]}?" if missing_fields else "Could you provide more details about your request?"
-
-        item_label = updated_draft.get('item') or 'items'
-        response_content = f"I understand your request for {item_label}. {question}"
-        next_step = "Clarification"
+        missing = [f for f in ["item", "quantity", "purpose", "required_date"] if not updated_draft.get(f)]
+        response_content = f"Could you help me with {missing[0].replace('_', ' ')} for your request?" if missing else "Could you provide more details?"
 
     ai_message = AIMessage(content=response_content)
+    print("AI Message:\n", ai_message)
 
     return {
         "messages": [ai_message],

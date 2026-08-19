@@ -1,5 +1,6 @@
 import logging
-from typing import Dict, Any, List, Sequence
+from typing import Dict, Any, List, Sequence, Optional
+from pydantic import BaseModel, Field
 from langchain_core.messages import AIMessage, SystemMessage, HumanMessage, BaseMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from app.agent.state import GraphState, DemandAnalysisSchema
@@ -22,6 +23,35 @@ DEMAND_TOOLS = [
     get_purchase_history,
     get_budget_status,
 ]
+
+class DemandJustificationResponse(BaseModel):
+    justification: str = Field(description="Clear, concise, professional explanation for the recommended purchase quantity, noting warehouse stock, asset availability, and budget status.")
+
+
+def extract_text_from_content(content: Any) -> str:
+    """Safely extracts clean plain text from LangChain message content (handles str, list of dicts, or nested blocks)."""
+    if isinstance(content, str):
+        return content.strip()
+    elif isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                if "text" in block:
+                    parts.append(str(block["text"]))
+                elif "content" in block:
+                    parts.append(str(block["content"]))
+            elif hasattr(block, "text"):
+                parts.append(str(block.text))
+        return "\n".join(parts).strip()
+    elif isinstance(content, dict):
+        if "text" in content:
+            return str(content["text"]).strip()
+        elif "content" in content:
+            return str(content["content"]).strip()
+    return str(content).strip()
+
 
 def generate_default_justification(
     requested_qty: int,
@@ -58,7 +88,7 @@ def generate_default_justification(
         )
 
     if pipeline_qty > 0:
-        justification += f" (Note: {pipeline_qty} units currently in open PR/PO pipeline)."
+        justification += f" Note: There are currently {pipeline_qty} units already in the procurement pipeline (open PRs/POs)."
 
     return justification
 
@@ -66,17 +96,17 @@ def generate_default_justification(
 async def demand_analysis_node(state: GraphState) -> Dict[str, Any]:
     """
     LangGraph Node function for the Demand Analysis Agent.
-    Executes DEMAND_ANALYSIS_PROMPT with Gemini LLM, fetches deterministic enterprise data,
-    and calculates data-backed recommended purchase quantity.
+    Fetches real-time stock, assets, pipeline, and budget status, calculates net demand,
+    and produces a data-backed recommended purchase quantity using DemandAnalysisSchema.
     """
     requirement_draft = state.get("requirement_draft", {})
     user_context = state.get("user_context", {})
 
-    item_name = requirement_draft.get("item", "Item")
-    category_id = requirement_draft.get("category", "")
+    item_name = requirement_draft.get("item", "General Item")
     requested_qty = requirement_draft.get("quantity", 1)
-    cost_center = user_context.get("cost_center", "CC-ENG-001")
+    category_id = requirement_draft.get("category")
     dept_id = user_context.get("department_id", "DEPT-ENG")
+    cost_center = user_context.get("cost_center", "CC-ENG-001")
 
     # 1. Fetch deterministic data via Demand Tools (Ground truth to prevent LLM math hallucination)
     inventory_res = get_inventory.invoke({"item_name": item_name, "category_id": category_id})
@@ -106,7 +136,7 @@ async def demand_analysis_node(state: GraphState) -> Dict[str, Any]:
     if settings.GEMINI_API_KEY and settings.GEMINI_API_KEY != "your_gemini_api_key_here":
         try:
             llm = ChatGoogleGenerativeAI(
-                model="gemini-3.1-flash-lite",
+                model=getattr(settings, "GEMINI_MODEL", "gemini-3.1-flash-lite"),
                 google_api_key=settings.GEMINI_API_KEY,
                 temperature=0.1
             )
@@ -121,8 +151,15 @@ async def demand_analysis_node(state: GraphState) -> Dict[str, Any]:
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=analysis_request)
             ]
-            llm_response = await llm.ainvoke(prompt_messages)
-            justification = str(llm_response.content).strip()
+            try:
+                structured_llm = llm.with_structured_output(DemandJustificationResponse)
+                llm_structured_res: DemandJustificationResponse = await structured_llm.ainvoke(prompt_messages)
+                justification = llm_structured_res.justification.strip()
+                print("LLM Structured:\n", llm_structured_res)
+            except Exception:
+                llm_response = await llm.ainvoke(prompt_messages)
+                justification = extract_text_from_content(llm_response.content)
+                print("LLM Not Structured:\n", llm_response)
         except Exception as e:
             logger.warning(f"Gemini LLM demand justification fallback: {e}")
             justification = generate_default_justification(
@@ -133,28 +170,31 @@ async def demand_analysis_node(state: GraphState) -> Dict[str, Any]:
             requested_qty, inv_qty, asset_qty, recommended_qty, pipeline_qty, cost_center, budget_res, item_name
         )
 
-    # 5. Prepare Updated Demand Analysis State Payload
-    demand_analysis_payload = {
-        "requested_quantity": requested_qty,
-        "available_inventory": inv_qty,
-        "available_assets": asset_qty,
-        "recommended_quantity": recommended_qty,
-        "justification": justification,
-        "is_complete": True
-    }
+    # 5. Build Validated State Payload using DemandAnalysisSchema
+    demand_analysis_obj = DemandAnalysisSchema(
+        requested_quantity=requested_qty,
+        available_inventory=inv_qty,
+        available_assets=asset_qty,
+        recommended_quantity=recommended_qty,
+        justification=justification,
+        is_complete=True
+    )
+    demand_analysis_payload = demand_analysis_obj.model_dump()
 
-    # 6. Formulate Response Message to User
-    response_content = (
-        f"📊 **Demand Analysis Complete**\n\n"
-        f"• **Requested Quantity:** {requested_qty}\n"
-        f"• **Warehouse Stock:** {inv_qty} units\n"
-        f"• **Unused Assets:** {asset_qty} units\n"
-        f"• **Recommended Purchase Quantity:** **{recommended_qty} units**\n\n"
-        f"**Justification:** {justification}\n\n"
-        f"Proceeding to generate your official Purchase Requisition (PR) draft..."
+    # 6. Format Professional Chat Message for the User
+    summary_message = (
+        f"📊 **Demand & Stock Analysis Complete for {item_name}:**\n\n"
+        f"• **Requested Quantity:** {requested_qty} units\n"
+        f"• **Warehouse Stock Available:** {inv_qty} units\n"
+        f"• **Unused/Returning Assets:** {asset_qty} units\n"
+        f"• **Pipeline Orders (Incoming):** {pipeline_qty} units\n"
+        f"• **Cost Center Budget Remaining ({cost_center}):** ${budget_res.get('remaining_budget', 0):,.2f} {budget_res.get('currency', 'USD')}\n\n"
+        f"💡 **Recommended Net Purchase Quantity:** **{recommended_qty} units**\n\n"
+        f"📝 **Justification:**\n{justification}\n\n"
+        f"Proceeding to generate draft Purchase Requisition (PR)..."
     )
 
-    ai_message = AIMessage(content=response_content)
+    ai_message = AIMessage(content=summary_message)
 
     return {
         "messages": [ai_message],

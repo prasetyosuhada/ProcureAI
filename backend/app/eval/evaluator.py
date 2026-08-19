@@ -7,6 +7,8 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from app.core.config import settings
 from app.eval.dataset import GoldenScenario
 
+from app.agent.nodes.demand_node import extract_text_from_content
+
 logger = logging.getLogger(__name__)
 
 class LLMJudgeResult(BaseModel):
@@ -46,7 +48,7 @@ async def evaluate_with_llm_judge(
         if "sourcing" in resp_lower or "procurement" in resp_lower or "policy" in resp_lower or "standard" in resp_lower or "vendor" in resp_lower or "clarify" in resp_lower:
             guardrail_complied = True
         else:
-            guardrail_complied = not completeness_matched
+            guardrail_complied = not bool(req_draft.get("is_complete"))
 
     metrics = {
         "item_extraction_accurate": item_matched,
@@ -94,7 +96,7 @@ Instructions:
                 HumanMessage(content=judge_prompt)
             ])
 
-            content = res.content.strip()
+            content = extract_text_from_content(res.content)
             if "```json" in content:
                 content = content.split("```json")[1].split("```")[0].strip()
             elif "```" in content:
