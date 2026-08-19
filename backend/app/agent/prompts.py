@@ -19,6 +19,7 @@ Instructions:
 3. If mandatory fields are missing, ask ONE concise, friendly clarification question.
 4. If specifications are mentioned, use get_specifications to check alignment with company standards.
 5. Do NOT ask about inventory, budget, or vendor choices (handled in later stages).
+6. When ALL mandatory fields have been captured and the requirement is complete, write a warm natural confirmation. State that the requirement details have been recorded, and ask the user to check/review the summary card below and confirm before proceeding to Demand & Stock Analysis. Do not say that you are already proceeding until the user confirms.
 
 Current User Context:
 - User: {user_name} ({user_id})

@@ -37,28 +37,28 @@ async def test_clarification_node_incomplete():
 
 @pytest.mark.asyncio
 async def test_clarification_node_complete():
-    """Verify requirement_clarification_node response when requirement is complete."""
+    """Verify requirement_clarification_node response when requirement details are complete (pending user confirmation)."""
     state = create_initial_graph_state({"user_id": "usr_1", "department_id": "DEPT-ENG"})
     state["messages"] = [
         HumanMessage(content="I need 10 laptops for backend development before September 1")
     ]
     
     result = await requirement_clarification_node(state)
-    assert result["next_agent"] == "Demand"
+    assert result["next_agent"] == "Clarification"
     assert result["requirement_draft"]["is_complete"] is True
     assert result["requirement_draft"]["quantity"] == 10
-    assert "Proceeding to Demand Analysis" in result["messages"][0].content
+    assert "confirm" in result["messages"][0].content.lower() or "summary" in result["messages"][0].content.lower() or "demand" in result["messages"][0].content.lower()
 
 @pytest.mark.asyncio
 async def test_clarification_node_other_item():
-    """Verify requirement_clarification_node handles arbitrary items like standing desks or software."""
+    """Verify requirement_clarification_node handles arbitrary items like standing desks."""
     state = create_initial_graph_state({"user_id": "usr_1", "department_id": "DEPT-ENG"})
     state["messages"] = [
         HumanMessage(content="I need 5 standing desks for UI/UX Design Team before Sept 1")
     ]
     
     result = await requirement_clarification_node(state)
-    assert result["next_agent"] == "Demand"
+    assert result["next_agent"] == "Clarification"
     assert result["requirement_draft"]["is_complete"] is True
     assert result["requirement_draft"]["item"] == "Standing Desks" or result["requirement_draft"]["item"] == "Standing Desk"
     assert result["requirement_draft"]["quantity"] == 5

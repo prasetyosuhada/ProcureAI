@@ -41,7 +41,7 @@ async def test_chat_endpoint_multi_turn_with_checkpointer():
         assert data1["requirement_draft"]["item"] == "Laptop"
         assert data1["requirement_draft"]["is_complete"] is False
 
-        # Turn 2: Provide complete details in same thread
+        # Turn 2: Provide complete details in same thread -> pauses for confirmation
         res2 = await client.post(
             "/api/v1/chat",
             json={
@@ -54,11 +54,22 @@ async def test_chat_endpoint_multi_turn_with_checkpointer():
         assert data2["thread_id"] == thread_id
         assert data2["requirement_draft"]["is_complete"] is True
         assert data2["requirement_draft"]["quantity"] == 10
-        # Verify automatic transition to Demand analysis node
-        assert data2["demand_analysis"] is not None
-        assert data2["demand_analysis"]["is_complete"] is True
-        assert data2["demand_analysis"]["recommended_quantity"] == 2
-        assert data2["next_agent"] == "GeneratePR"
+        assert data2["next_agent"] == "Clarification"
+
+        # Turn 3: Confirm specifications -> triggers Demand Analysis
+        res3 = await client.post(
+            "/api/v1/chat",
+            json={
+                "thread_id": thread_id,
+                "message": "I confirm the specifications. Please proceed to demand analysis."
+            }
+        )
+        assert res3.status_code == 200
+        data3 = res3.json()
+        assert data3["demand_analysis"] is not None
+        assert data3["demand_analysis"]["is_complete"] is True
+        assert data3["demand_analysis"]["recommended_quantity"] == 2
+        assert data3["next_agent"] == "GeneratePR"
 
 @pytest.mark.asyncio
 async def test_chat_input_sanitization():
@@ -77,7 +88,7 @@ async def test_chat_input_sanitization():
 
 @pytest.mark.asyncio
 async def test_chat_user_context_integration():
-    """Verify user context headers pass through to state machine and demand tools."""
+    """Verify user context headers pass through to state machine and demand tools upon confirmation."""
     headers = {
         "X-User-ID": "usr_777",
         "X-User-Name": "Bob Tester",
@@ -86,12 +97,25 @@ async def test_chat_user_context_integration():
     }
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.post(
+        res1 = await client.post(
             "/api/v1/chat",
             headers=headers,
             json={"message": "Need 10 laptops for backend development before Sept 1"}
         )
-        assert response.status_code == 200
-        data = response.json()
-        assert data["demand_analysis"] is not None
-        assert data["demand_analysis"]["is_complete"] is True
+        assert res1.status_code == 200
+        data1 = res1.json()
+        thread_id = data1["thread_id"]
+
+        # Confirm to trigger demand analysis
+        res2 = await client.post(
+            "/api/v1/chat",
+            headers=headers,
+            json={
+                "thread_id": thread_id,
+                "message": "I confirm the specifications. Please proceed to demand analysis."
+            }
+        )
+        assert res2.status_code == 200
+        data2 = res2.json()
+        assert data2["demand_analysis"] is not None
+        assert data2["demand_analysis"]["is_complete"] is True

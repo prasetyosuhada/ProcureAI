@@ -17,12 +17,11 @@ _compiled_procure_graph = None
 def route_clarification(state: GraphState) -> str:
     """
     Conditional routing from Clarification node.
-    If requirement is complete and next_agent is Demand, proceed to Demand node.
-    Otherwise, pause/end turn to wait for human user clarification input.
+    If next_agent is Demand (i.e. requirement confirmed), proceed to Demand node.
+    Otherwise, pause/end turn to wait for human user clarification or confirmation input.
     """
     next_agent = state.get("next_agent")
-    req_draft = state.get("requirement_draft", {})
-    if next_agent == "Demand" or req_draft.get("is_complete"):
+    if next_agent == "Demand":
         return "demand"
     return END
 

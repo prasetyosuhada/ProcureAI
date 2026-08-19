@@ -20,16 +20,23 @@ async def test_checkpointer_preserves_conversation_history():
     assert r1["next_agent"] == "Clarification"
     assert len(r1["messages"]) == 2  # 1 Human + 1 AI
 
-    # Turn 2: Follow-up clarification response in same thread
+    # Turn 2: Follow-up clarification response in same thread -> draft complete, pauses for confirmation
     s2 = {"messages": [HumanMessage(content="We need 10 units before Sept 1 for backend team with 32GB RAM and 1TB SSD")]}
     r2 = await graph.ainvoke(s2, config=config)
     
     # State should have preserved previous item and merged new details
     assert r2["requirement_draft"]["is_complete"] is True
     assert r2["requirement_draft"]["quantity"] == 10
-    assert r2["demand_analysis"]["is_complete"] is True
-    assert r2["demand_analysis"]["recommended_quantity"] == 2
+    assert r2["next_agent"] == "Clarification"
     assert len(r2["messages"]) >= 4  # Preserved history across turns
+
+    # Turn 3: User confirms -> triggers demand analysis
+    s3 = {"messages": [HumanMessage(content="I confirm the specifications. Please proceed to demand analysis.")]}
+    r3 = await graph.ainvoke(s3, config=config)
+
+    assert r3["demand_analysis"]["is_complete"] is True
+    assert r3["demand_analysis"]["recommended_quantity"] == 2
+    assert len(r3["messages"]) >= 6  # Preserved cumulative history across turns
 
 @pytest.mark.asyncio
 async def test_checkpointer_isolates_different_threads():

@@ -109,7 +109,7 @@ export const App: React.FC = () => {
         setPrDraft(generatedPR);
       }
 
-      // Append Agent response message with interactive payload
+      // Append Agent response message with requirement draft, demand analysis, and PR draft
       const assistantMessage: ChatMessage = {
         id: `msg_${Date.now()}_ai`,
         role: 'assistant',

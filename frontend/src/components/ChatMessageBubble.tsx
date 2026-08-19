@@ -86,45 +86,56 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
         {isUser ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
       </div>
 
-      {/* Message Bubble Container */}
-      <div
-        className={`max-w-[90%] sm:max-w-[80%] rounded-2xl px-4 py-3 shadow-lg ${
-          isUser
-            ? 'bg-indigo-600 text-white rounded-tr-sm'
-            : 'glass-card border border-slate-700/60 rounded-tl-sm'
-        }`}
-      >
-        {/* Header (Agent label / User label) */}
-        <div className="flex items-center justify-between gap-4 mb-1.5 pb-1 border-b border-white/5">
-          <span
-            className={`text-xs font-semibold ${
-              isUser ? 'text-indigo-200' : 'text-indigo-400 flex items-center gap-1'
-            }`}
-          >
-            {!isUser && <Sparkles className="w-3 h-3" />}
-            {isUser ? 'You' : (message.agentName || 'ProcureAI Agent')}
-          </span>
-          <span className="text-[10px] text-slate-400 font-mono">
-            {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-          </span>
+      {/* Content Container (Main Bubble + Separate Cards below) */}
+      <div className="flex flex-col gap-2.5 max-w-[92%] sm:max-w-[82%]">
+        {/* Main Text Message Bubble */}
+        <div
+          className={`rounded-2xl px-4 py-3 shadow-lg ${
+            isUser
+              ? 'bg-indigo-600 text-white rounded-tr-sm'
+              : 'glass-card border border-slate-700/60 rounded-tl-sm'
+          }`}
+        >
+          {/* Header (Agent label / User label) */}
+          <div className="flex items-center justify-between gap-4 mb-1.5 pb-1 border-b border-white/5">
+            <span
+              className={`text-xs font-semibold ${
+                isUser ? 'text-indigo-200' : 'text-indigo-400 flex items-center gap-1'
+              }`}
+            >
+              {!isUser && <Sparkles className="w-3 h-3" />}
+              {isUser ? 'You' : (message.agentName || 'ProcureAI Agent')}
+            </span>
+            <span className="text-[10px] text-slate-400 font-mono">
+              {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          </div>
+
+          {/* Message Text Content */}
+          <div className="text-sm font-normal">
+            {formatContent(message.content)}
+          </div>
+
+          {/* Read Receipt Icon for User */}
+          {isUser && (
+            <div className="flex justify-end mt-1">
+              <CheckCheck className="w-3.5 h-3.5 text-indigo-300 opacity-80" />
+            </div>
+          )}
         </div>
 
-        {/* Message Text Content */}
-        <div className="text-sm font-normal">
-          {formatContent(message.content)}
-        </div>
-
-        {/* Interactive Widget 1: Requirement Draft Card */}
-        {message.requirementDraft && (
+        {/* Separate Card 1: Requirement Summary Card (Beda bubble di bawah chat, only when complete) */}
+        {!isUser && message.requirementDraft?.is_complete && (
           <RequirementDraftCard
             draft={message.requirementDraft}
             onConfirm={onConfirmRequirement}
             onEdit={onEditRequirement}
+            isConfirmed={Boolean(message.demandAnalysis)}
           />
         )}
 
-        {/* Interactive Widget 2: Demand Analysis Optimization Card */}
-        {message.demandAnalysis && (
+        {/* Separate Card 2: Demand Analysis Optimization Card */}
+        {!isUser && message.demandAnalysis && (
           <DemandAnalysisCard
             analysis={message.demandAnalysis}
             onAccept={onAcceptDemand}
@@ -132,20 +143,13 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
           />
         )}
 
-        {/* Interactive Widget 3: PR Draft Ready Card */}
-        {message.prDraft && (
+        {/* Separate Card 3: PR Draft Ready Card */}
+        {!isUser && message.prDraft && (
           <PRDraftCard
             prDraft={message.prDraft}
             onOpenReview={() => onOpenPRReview && onOpenPRReview(message.prDraft!)}
             onSubmitDirect={() => onSubmitPRDirect && onSubmitPRDirect(message.prDraft!)}
           />
-        )}
-
-        {/* Read Receipt Icon for User */}
-        {isUser && (
-          <div className="flex justify-end mt-1">
-            <CheckCheck className="w-3.5 h-3.5 text-indigo-300 opacity-80" />
-          </div>
         )}
       </div>
     </div>

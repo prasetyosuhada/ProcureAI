@@ -209,8 +209,20 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
         updated_draft = extract_requirement_heuristics(last_user_message, current_draft)
     print("Updated Draft:\n", updated_draft)
 
-    # Determine next routing step based on completeness
-    next_step = "Demand" if updated_draft.get("is_complete") else "Clarification"
+    # Determine next routing step based on completeness & user confirmation
+    user_lower = last_user_message.lower().strip()
+    is_complete = bool(updated_draft.get("is_complete"))
+    
+    # Check if user is confirming a complete requirement draft
+    user_explicit_confirm = any(trigger in user_lower for trigger in [
+        "confirm", "proceed", "setuju", "lanjut", "sesuai", "benar", 
+        "ok proceed", "ya proceed", "i confirm", "agree", "siap"
+    ])
+    
+    if is_complete and (user_explicit_confirm or current_draft.get("is_complete")):
+        next_step = "Demand"
+    else:
+        next_step = "Clarification"
 
     # --- Pass 2: Generate natural language response via LLM ---
     if settings.GEMINI_API_KEY and settings.GEMINI_API_KEY != "your_gemini_api_key_here":
@@ -231,13 +243,18 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
             if not updated_draft.get("required_date"):
                 missing_fields.append("required_date")
 
-            if next_step == "Demand":
+            if is_complete and next_step == "Demand":
                 response_instruction = (
-                    "The user's requirement is now complete. "
-                    "Write a warm, natural confirmation message summarizing what you've captured — "
-                    "item, category, quantity, purpose, specifications, and required date — "
-                    "and mention that you are proceeding to Demand Analysis to check warehouse stock and organizational assets. "
-                    "Write it conversationally and naturally."
+                    "The user has confirmed the requirement specifications. "
+                    "Acknowledge the confirmation warmly and state that you are proceeding to Demand Analysis "
+                    "to check warehouse stock, organizational assets, and budget availability."
+                )
+            elif is_complete:
+                response_instruction = (
+                    "The user's requirement details are now complete. "
+                    "Write a warm, natural message confirming what you've captured (item, quantity, purpose, required date) "
+                    "and ask the user to check/review the summary card below and confirm if everything is accurate to proceed to Demand & Stock Analysis. "
+                    "Do NOT say you are already proceeding yet. Do NOT use bullet-point templates; write conversationally."
                 )
             else:
                 response_instruction = (
@@ -254,6 +271,7 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
                     f"Your task now: {response_instruction}"
                 ))
             ] + list(messages)
+            print("Response Prompt:\n", response_prompt)
 
             llm_response = await llm.ainvoke(response_prompt)
             llm_response_text = extract_text_from_content(llm_response.content)
@@ -264,26 +282,37 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
     # Fallback to simple template if LLM response generation failed
     if llm_response_text:
         response_content = llm_response_text
-    elif next_step == "Demand":
+    elif is_complete and next_step == "Demand":
+        item = updated_draft.get("item", "Item")
+        qty = updated_draft.get("quantity", 1)
+        response_content = (
+            f"Thank you for confirming! Proceeding to Demand Analysis for {qty}x {item} to check warehouse stock and organizational assets..."
+        )
+    elif is_complete:
         item = updated_draft.get("item", "Item")
         qty = updated_draft.get("quantity", 1)
         purpose = updated_draft.get("purpose", "General")
         req_date = updated_draft.get("required_date", "TBD")
         specs_str = ", ".join([f"{k}: {v}" for k, v in updated_draft.get("specifications", {}).items()]) or "Standard"
         response_content = (
-            f"Thank you! I have recorded your finalized requirement:\n\n"
-            f"• **Item:** {item}\n"
-            f"• **Category:** {updated_draft.get('category', 'General')}\n"
-            f"• **Quantity:** {qty}\n"
-            f"• **Purpose:** {purpose}\n"
-            f"• **Specifications:** {specs_str}\n"
-            f"• **Required Date:** {req_date}\n\n"
-            f"Proceeding to Demand Analysis to check warehouse stock and organizational assets..."
+            f"Great! I have recorded your requirement for {qty}x {item} ({specs_str}) for {purpose}, needed by {req_date}. "
+            f"Please review the summary card below and confirm if everything is accurate to proceed to Demand & Stock Analysis."
         )
+        # response_content = (
+        #     f"Thank you! I have recorded your finalized requirement:\n\n"
+        #     f"• **Item:** {item}\n"
+        #     f"• **Category:** {updated_draft.get('category', 'General')}\n"
+        #     f"• **Quantity:** {qty}\n"
+        #     f"• **Purpose:** {purpose}\n"
+        #     f"• **Specifications:** {specs_str}\n"
+        #     f"• **Required Date:** {req_date}\n\n"
+        #     f"Proceeding to Demand Analysis to check warehouse stock and organizational assets..."
+        # )
     else:
         missing = [f for f in ["item", "quantity", "purpose", "required_date"] if not updated_draft.get(f)]
         response_content = f"Could you help me with {missing[0].replace('_', ' ')} for your request?" if missing else "Could you provide more details?"
 
+    print("Final Response Content:\n", response_content)
     ai_message = AIMessage(content=response_content)
     print("AI Message:\n", ai_message)
 

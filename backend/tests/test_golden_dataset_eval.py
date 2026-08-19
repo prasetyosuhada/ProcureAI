@@ -22,6 +22,11 @@ async def test_golden_scenario_evaluation(scenario: GoldenScenario):
 
     output_state = await graph.ainvoke(input_state, config=config)
 
+    # If requirement draft is complete and scenario expects demand evaluation, simulate human confirmation
+    if output_state.get("requirement_draft", {}).get("is_complete") and scenario.expected_recommended_quantity is not None and not output_state.get("demand_analysis", {}).get("is_complete"):
+        confirm_input = {"messages": [HumanMessage(content="I confirm the extracted specifications and requirements. Please proceed to demand analysis.")]}
+        output_state = await graph.ainvoke(confirm_input, config=config)
+
     # Extract last AI message content
     ai_text = ""
     for msg in reversed(output_state.get("messages", [])):

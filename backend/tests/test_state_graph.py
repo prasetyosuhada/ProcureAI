@@ -43,7 +43,7 @@ async def test_state_graph_clarification_turn_with_checkpointer():
 
 @pytest.mark.asyncio
 async def test_state_graph_full_flow_clarification_to_demand():
-    """Verify state graph executes Clarification and automatically flows into Demand node when complete."""
+    """Verify state graph gathers requirements in Clarification, pauses for confirmation, and executes Demand node upon user confirm."""
     checkpointer = MemorySaver()
     app = build_procure_graph(checkpointer=checkpointer)
     config = {"configurable": {"thread_id": "thread-test-2"}}
@@ -54,11 +54,16 @@ async def test_state_graph_full_flow_clarification_to_demand():
         HumanMessage(content="I need 10 laptops for backend development team before Sept 1 with 32GB RAM and 1TB SSD")
     ]
 
-    result = await app.ainvoke(initial_state, config=config)
+    # Turn 1: Clarification collects details and pauses for human confirmation
+    r1 = await app.ainvoke(initial_state, config=config)
+    assert r1["requirement_draft"]["is_complete"] is True
+    assert r1["requirement_draft"]["quantity"] == 10
+    assert r1["next_agent"] == "Clarification"
 
-    # Verify both Clarification and Demand nodes executed
-    assert result["requirement_draft"]["is_complete"] is True
-    assert result["requirement_draft"]["quantity"] == 10
-    assert result["demand_analysis"]["is_complete"] is True
-    assert result["demand_analysis"]["recommended_quantity"] == 2  # 10 requested - (3 inv + 5 assets) = 2
-    assert result["next_agent"] == "GeneratePR"
+    # Turn 2: User confirms specifications -> triggers Demand Analysis
+    confirm_state = {"messages": [HumanMessage(content="I confirm the specifications. Please proceed to demand analysis.")]}
+    r2 = await app.ainvoke(confirm_state, config=config)
+
+    assert r2["demand_analysis"]["is_complete"] is True
+    assert r2["demand_analysis"]["recommended_quantity"] == 2  # 10 requested - (3 inv + 5 assets) = 2
+    assert r2["next_agent"] == "GeneratePR"

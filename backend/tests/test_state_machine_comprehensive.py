@@ -28,8 +28,8 @@ def test_route_clarification_edges():
     }
     assert route_clarification(incomplete_state_dict) == END
 
-    # Case 2: Complete requirement -> Should route to demand node
-    complete_state_dict: GraphState = {
+    # Case 2: Complete requirement pending user confirmation -> Should pause at END
+    pending_confirm_state: GraphState = {
         "messages": [],
         "user_context": {},
         "requirement_draft": {"item": "Laptop", "quantity": 10, "is_complete": True},
@@ -37,18 +37,18 @@ def test_route_clarification_edges():
         "pr_draft": None,
         "next_agent": "Clarification"
     }
-    assert route_clarification(complete_state_dict) == "demand"
+    assert route_clarification(pending_confirm_state) == END
 
-    # Case 3: Pydantic model representation
-    complete_state_model: GraphState = {
+    # Case 3: Confirmed requirement -> Should route to demand node
+    confirmed_state: GraphState = {
         "messages": [],
         "user_context": {},
-        "requirement_draft": RequirementDraftSchema(item="Monitor", quantity=2, is_complete=True).model_dump(),
+        "requirement_draft": {"item": "Monitor", "quantity": 2, "is_complete": True},
         "demand_analysis": None,
         "pr_draft": None,
-        "next_agent": "Clarification"
+        "next_agent": "Demand"
     }
-    assert route_clarification(complete_state_model) == "demand"
+    assert route_clarification(confirmed_state) == "demand"
 
 def test_route_demand_edges():
     """Verify route_demand routes to END state upon completion."""
@@ -64,7 +64,7 @@ def test_route_demand_edges():
 
 @pytest.mark.asyncio
 async def test_state_machine_single_turn_fast_path():
-    """Verify state machine can process a fully specified requirement in a single continuous turn."""
+    """Verify state machine processes complete specifications, pauses for confirmation, and executes demand analysis upon confirm."""
     checkpointer = MemorySaver()
     graph = build_procure_graph(checkpointer=checkpointer)
     config = {"configurable": {"thread_id": "thread-fast-path-001"}}
@@ -80,21 +80,25 @@ async def test_state_machine_single_turn_fast_path():
         HumanMessage(content="I need 10 laptops for backend development before Sept 1 with 32GB RAM and 1TB SSD")
     ]
 
-    # In a single run, graph should go: START -> clarification_node -> demand_node -> END
-    result = await graph.ainvoke(initial_state, config=config)
+    # Turn 1: Collects specifications into complete draft and pauses for confirmation
+    r1 = await graph.ainvoke(initial_state, config=config)
+    assert r1["requirement_draft"]["is_complete"] is True
+    assert r1["requirement_draft"]["item"] == "Laptop"
+    assert r1["requirement_draft"]["quantity"] == 10
+    assert r1["next_agent"] == "Clarification"
 
-    assert result["requirement_draft"]["is_complete"] is True
-    assert result["requirement_draft"]["item"] == "Laptop"
-    assert result["requirement_draft"]["quantity"] == 10
+    # Turn 2: User confirms -> triggers Demand Analysis
+    confirm_state = {"messages": [HumanMessage(content="I confirm the specifications. Please proceed to demand analysis.")]}
+    r2 = await graph.ainvoke(confirm_state, config=config)
 
-    assert result["demand_analysis"] is not None
-    assert result["demand_analysis"]["is_complete"] is True
-    assert result["demand_analysis"]["recommended_quantity"] == 2
-    assert result["next_agent"] == "GeneratePR"
+    assert r2["demand_analysis"] is not None
+    assert r2["demand_analysis"]["is_complete"] is True
+    assert r2["demand_analysis"]["recommended_quantity"] == 2
+    assert r2["next_agent"] == "GeneratePR"
 
 @pytest.mark.asyncio
 async def test_state_machine_multi_turn_clarification_loop():
-    """Verify state machine loops on clarification until all required data is gathered."""
+    """Verify state machine loops on clarification until all required data is gathered and confirmed."""
     checkpointer = MemorySaver()
     graph = build_procure_graph(checkpointer=checkpointer)
     config = {"configurable": {"thread_id": "thread-clarification-loop-002"}}
@@ -114,16 +118,22 @@ async def test_state_machine_multi_turn_clarification_loop():
     assert r1["next_agent"] == "Clarification"
     assert r1["demand_analysis"]["is_complete"] is False
 
-    # Turn 2: User provides quantity and team purpose
+    # Turn 2: User provides quantity and team purpose -> draft is complete, pauses for confirmation
     t2_state = {"messages": [HumanMessage(content="We need 12 chairs for the operations room before Oct 15")]}
     r2 = await graph.ainvoke(t2_state, config=config)
 
     assert r2["requirement_draft"]["is_complete"] is True
     assert r2["requirement_draft"]["quantity"] == 12
-    assert r2["demand_analysis"]["is_complete"] is True
+    assert r2["next_agent"] == "Clarification"
+
+    # Turn 3: User confirms -> triggers Demand Analysis
+    t3_state = {"messages": [HumanMessage(content="I confirm the specifications. Please proceed to demand analysis.")]}
+    r3 = await graph.ainvoke(t3_state, config=config)
+
+    assert r3["demand_analysis"]["is_complete"] is True
     # 12 requested - 4 warehouse chairs - 4 unused assets = 4 recommended
-    assert r2["demand_analysis"]["recommended_quantity"] == 4
-    assert r2["next_agent"] == "GeneratePR"
+    assert r3["demand_analysis"]["recommended_quantity"] == 4
+    assert r3["next_agent"] == "GeneratePR"
 
 @pytest.mark.asyncio
 async def test_state_machine_human_override_resumption():
