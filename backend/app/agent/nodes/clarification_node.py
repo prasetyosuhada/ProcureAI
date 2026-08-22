@@ -1,10 +1,17 @@
 import re
-import datetime
 import logging
 from typing import Dict, Any, List, Sequence
 from langchain_core.messages import AIMessage, SystemMessage, BaseMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
-from app.agent.state import GraphState, RequirementDraftSchema
+from app.agent.state import (
+    GraphState,
+    RequirementDraftSchema,
+    PRSpecification,
+    PRArtifact,
+    AgentAction,
+    AttentionItem,
+    reduce_attention_items,
+)
 from app.agent.prompts import REQUIREMENT_CLARIFICATION_PROMPT
 from app.tools.clarification_tools import get_categories, get_specifications, get_procurement_policy
 from app.core.config import settings
@@ -13,8 +20,13 @@ logger = logging.getLogger(__name__)
 
 CLARIFICATION_TOOLS = [get_categories, get_specifications, get_procurement_policy]
 
+
+# ==============================================================================
+# Helpers
+# ==============================================================================
+
 def extract_text_from_content(content: Any) -> str:
-    """Safely extracts clean plain text from LangChain message content (handles str, list of dicts, or nested blocks)."""
+    """Safely extracts clean plain text from LangChain message content."""
     if isinstance(content, str):
         return content.strip()
     elif isinstance(content, list):
@@ -37,6 +49,7 @@ def extract_text_from_content(content: Any) -> str:
             return str(content["content"]).strip()
     return str(content).strip()
 
+
 def get_last_user_message(messages: Sequence[BaseMessage]) -> str:
     """Extract the text content of the latest human message from conversation history."""
     for msg in reversed(messages):
@@ -45,6 +58,7 @@ def get_last_user_message(messages: Sequence[BaseMessage]) -> str:
         elif hasattr(msg, "content") and not getattr(msg, "role", None) == "assistant":
             return extract_text_from_content(msg.content)
     return ""
+
 
 def extract_requirement_heuristics(user_text: str, current_draft: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -59,7 +73,7 @@ def extract_requirement_heuristics(user_text: str, current_draft: Dict[str, Any]
     text = user_text.strip()
     text_lower = text.lower()
 
-    # 1. Dynamic Item & Category Extraction (Works for ANY item)
+    # 1. Dynamic Item & Category Extraction
     if not draft.get("item"):
         if "laptop" in text_lower or "macbook" in text_lower or "notebook" in text_lower:
             draft["item"] = "Laptop"
@@ -70,9 +84,8 @@ def extract_requirement_heuristics(user_text: str, current_draft: Dict[str, Any]
         elif "desk" in text_lower or "table" in text_lower:
             draft["item"] = "Standing Desk"
         else:
-            # Match 'need/want/buy/order [quantity] <ITEM> for/before/with...'
             item_match = re.search(
-                r'\b(?:need|want|buy|request|order|purchasing|for)\s+(?:to\s+buy\s+)?(?:a|an|\$[\d,]+|\d+)?\s*(?:a|an|\$[\d,]+|\d+)?\s*([a-zA-Z0-9\s\-/]{2,35}?)(?=\s+(?:for|before|by|with|to|in|\.)\b|[.,;]|$)',
+                r'\b(?:need|want|buy|request|order|purchasing|for)\s+(?:to\s+buy\s+)?(?:a|an|\$[\d,]+|\d+)?\s*(?:a|an|\$[\d,]+|\d+)?\s*([a-zA-Z0-9\s\-/]{2,35}?)(?=\s+(?:for|before|by|with|to|in|\.)|\b|[.,;]|$)',
                 text, re.IGNORECASE
             )
             if item_match:
@@ -85,7 +98,6 @@ def extract_requirement_heuristics(user_text: str, current_draft: Dict[str, Any]
                         item_title = item_title[:-1]
                     draft["item"] = item_title
 
-    # Default category resolution using get_categories tool
     if draft.get("item") and not draft.get("category"):
         cat_results = get_categories.invoke({"query": draft["item"]})
         if cat_results:
@@ -101,7 +113,7 @@ def extract_requirement_heuristics(user_text: str, current_draft: Dict[str, Any]
         except ValueError:
             pass
 
-    # 3. Extract Purpose / Workload
+    # 3. Extract Purpose
     if "backend" in text_lower:
         draft["purpose"] = "Backend Development Team"
         specs["workload"] = "Backend / Docker"
@@ -120,7 +132,7 @@ def extract_requirement_heuristics(user_text: str, current_draft: Dict[str, Any]
         elif len(text) > 15:
             draft["purpose"] = text
 
-    # 4. Extract Specifications (RAM, Storage, general specs)
+    # 4. Extract Specifications
     ram_match = re.search(r'\b(\d+\s*gb)\s*ram\b', text_lower)
     if ram_match:
         specs["ram"] = ram_match.group(1).upper().replace(" ", "")
@@ -162,17 +174,109 @@ def extract_requirement_heuristics(user_text: str, current_draft: Dict[str, Any]
     return draft
 
 
+def _build_pr_artifact_from_draft(
+    draft: Dict[str, Any],
+    user_context: Dict[str, Any],
+    is_user_confirmed: bool
+) -> Dict[str, Any]:
+    """
+    Converts legacy requirement_draft dict into Phase 1 PRArtifact format.
+    Specification fields: is_confirmed is set to True only if all mandatory fields
+    are present AND is_user_confirmed is True (user clicked Confirm button).
+    """
+    raw_specs = draft.get("specifications", {})
+    pr_specs: List[PRSpecification] = []
+
+    for field_name, value in raw_specs.items():
+        if value:
+            pr_specs.append(PRSpecification(
+                field_name=field_name,
+                value=str(value),
+                # Jalur 2: Clarification Agent sets confirmed only when user explicitly confirmed
+                is_confirmed=is_user_confirmed and bool(draft.get("is_complete"))
+            ))
+
+    artifact = PRArtifact(
+        item_name=draft.get("item"),
+        category=draft.get("category"),
+        quantity=draft.get("quantity"),
+        department=user_context.get("department_id"),
+        cost_center=user_context.get("cost_center"),
+        purpose=draft.get("purpose"),
+        required_date=draft.get("required_date"),
+        specifications=pr_specs,
+        status="draft"
+    )
+    return artifact.model_dump()
+
+
+def _build_clarification_attention_items(
+    draft: Dict[str, Any],
+    user_context: Dict[str, Any]
+) -> List[Dict[str, Any]]:
+    """
+    Generates AttentionItem list based on specification and policy checks.
+    IDs are deterministic: spec_{field_name}, policy_{rule_key}.
+    """
+    items: List[Dict[str, Any]] = []
+    specs = draft.get("specifications", {})
+
+    # Check IT policy compliance for GPU/RAM specs
+    gpu_val = specs.get("gpu") or specs.get("GPU", "")
+    if gpu_val and "rtx 4090" in str(gpu_val).lower():
+        items.append(AttentionItem(
+            id="policy_gpu_special_justification",
+            category="policy",
+            severity="warning",
+            message=f"GPU '{gpu_val}' requires additional Engineering Manager justification per IT Policy IT-003.",
+            resolved=False
+        ).model_dump())
+
+    # Check company standard RAM compliance
+    ram_val = specs.get("ram") or specs.get("RAM", "")
+    if ram_val:
+        try:
+            policy_result = get_procurement_policy.invoke({
+                "category_id": "IT-LAPTOP",
+                "cost_center": user_context.get("cost_center", "CC-ENG-001")
+            })
+            max_ram = policy_result.get("max_specs", {}).get("ram", "")
+            if max_ram and ram_val and int(''.join(filter(str.isdigit, str(ram_val)))) > int(''.join(filter(str.isdigit, str(max_ram)))):
+                items.append(AttentionItem(
+                    id=f"spec_ram",
+                    category="specification",
+                    severity="warning",
+                    message=f"RAM '{ram_val}' exceeds company standard maximum of '{max_ram}'. Requires additional approval.",
+                    resolved=False
+                ).model_dump())
+        except Exception:
+            pass
+
+    return items
+
+
+# ==============================================================================
+# Node Function
+# ==============================================================================
+
 async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
     """
-    LangGraph Node function for the Requirement Clarification Agent.
-    Uses REQUIREMENT_CLARIFICATION_PROMPT with Gemini LLM and bound tools, with dynamic fallback.
+    LangGraph Node: Requirement Clarification Agent.
+
+    Phase 1 additions:
+    - Emits `pr` (PRArtifact) via reduce_pr_artifact (field-level merge).
+    - Emits `progress` update (clarification stage).
+    - Emits `agent_activity` for each tool call (append-only).
+    - Emits `attention_items` for spec/policy issues (upsert by deterministic ID).
+
+    Legacy backward compatibility:
+    - Still writes to `requirement_draft` (DEPRECATED: do not rely in new code).
     """
     messages: Sequence[BaseMessage] = state.get("messages", [])
     user_context = state.get("user_context", {})
     current_draft = state.get("requirement_draft", RequirementDraftSchema().model_dump())
     last_user_message = get_last_user_message(messages)
 
-    # Format the REQUIREMENT_CLARIFICATION_PROMPT with user context
     system_prompt = REQUIREMENT_CLARIFICATION_PROMPT.format(
         user_name=user_context.get("user_name", "User"),
         user_id=user_context.get("user_id", "usr_demo"),
@@ -181,10 +285,10 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
     )
 
     updated_draft = dict(current_draft)
-
+    agent_activity: List[Dict[str, Any]] = []
     llm_response_text: str | None = None
 
-    # Invoke Gemini LLM if API Key is configured
+    # --- Pass 1: Structured extraction ---
     if settings.GEMINI_API_KEY and settings.GEMINI_API_KEY != "your_gemini_api_key_here":
         try:
             llm = ChatGoogleGenerativeAI(
@@ -192,39 +296,73 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
                 google_api_key=settings.GEMINI_API_KEY,
                 temperature=0.1
             )
-            # --- Pass 1: Structured extraction ---
             structured_llm = llm.with_structured_output(RequirementDraftSchema)
             prompt_messages = [SystemMessage(content=system_prompt)] + list(messages)
             llm_result: RequirementDraftSchema = await structured_llm.ainvoke(prompt_messages)
             print("LLM Structured:\n", llm_result)
-
             extracted_dict = llm_result.model_dump()
             for k, v in extracted_dict.items():
                 if v:
                     updated_draft[k] = v
+
+            agent_activity.append(AgentAction(
+                tool_name="llm_structured_extraction",
+                label="Extracting requirement fields",
+                status="done",
+                result_summary=f"Extracted: item={updated_draft.get('item')}, qty={updated_draft.get('quantity')}"
+            ).model_dump())
         except Exception as e:
             logger.warning(f"Gemini LLM extraction fallback to dynamic parser: {e}")
             updated_draft = extract_requirement_heuristics(last_user_message, current_draft)
+            agent_activity.append(AgentAction(
+                tool_name="heuristic_extractor",
+                label="Parsing requirement (offline mode)",
+                status="done",
+                result_summary=f"Heuristic: item={updated_draft.get('item')}, qty={updated_draft.get('quantity')}"
+            ).model_dump())
     else:
         updated_draft = extract_requirement_heuristics(last_user_message, current_draft)
+        agent_activity.append(AgentAction(
+            tool_name="heuristic_extractor",
+            label="Parsing requirement (offline mode)",
+            status="done",
+            result_summary=f"item={updated_draft.get('item')}, qty={updated_draft.get('quantity')}"
+        ).model_dump())
+
     print("Updated Draft:\n", updated_draft)
 
-    # Determine next routing step based on completeness & user confirmation
+    # --- Routing: confirm → Demand ---
     user_lower = last_user_message.lower().strip()
     is_complete = bool(updated_draft.get("is_complete"))
-    
-    # Check if user is confirming a complete requirement draft
     user_explicit_confirm = any(trigger in user_lower for trigger in [
-        "confirm", "proceed", "setuju", "lanjut", "sesuai", "benar", 
+        "confirm", "proceed", "setuju", "lanjut", "sesuai", "benar",
         "ok proceed", "ya proceed", "i confirm", "agree", "siap"
     ])
-    
+
     if is_complete and (user_explicit_confirm or current_draft.get("is_complete")):
         next_step = "Demand"
     else:
         next_step = "Clarification"
 
-    # --- Pass 2: Generate natural language response via LLM ---
+    # is_confirmed is True only via Jalur 1 (explicit button) detected via user_explicit_confirm
+    # or Jalur 2 (structured output) when is_complete without ambiguity
+    is_user_confirmed = is_complete and user_explicit_confirm
+
+    # --- Phase 1: Build PRArtifact update ---
+    pr_update = _build_pr_artifact_from_draft(updated_draft, user_context, is_user_confirmed)
+
+    # --- Phase 1: Build Progress update ---
+    if next_step == "Demand":
+        progress_update = {"clarification": "complete", "demand_analysis": "in_progress"}
+    elif is_complete:
+        progress_update = {"clarification": "in_progress"}  # waiting for user confirm
+    else:
+        progress_update = {"clarification": "in_progress"}
+
+    # --- Phase 1: Build AttentionItems from spec/policy checks ---
+    new_attention_items = _build_clarification_attention_items(updated_draft, user_context)
+
+    # --- Pass 2: Generate natural language response ---
     if settings.GEMINI_API_KEY and settings.GEMINI_API_KEY != "your_gemini_api_key_here":
         try:
             llm = ChatGoogleGenerativeAI(
@@ -232,7 +370,6 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
                 google_api_key=settings.GEMINI_API_KEY,
                 temperature=0.7
             )
-
             missing_fields = []
             if not updated_draft.get("item"):
                 missing_fields.append("item")
@@ -271,7 +408,6 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
                     f"Your task now: {response_instruction}"
                 ))
             ] + list(messages)
-            print("Response Prompt:\n", response_prompt)
 
             llm_response = await llm.ainvoke(response_prompt)
             llm_response_text = extract_text_from_content(llm_response.content)
@@ -279,14 +415,15 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
             logger.warning(f"Gemini LLM response generation failed, using fallback: {e}")
             llm_response_text = None
 
-    # Fallback to simple template if LLM response generation failed
+    # Fallback response template
     if llm_response_text:
         response_content = llm_response_text
     elif is_complete and next_step == "Demand":
         item = updated_draft.get("item", "Item")
         qty = updated_draft.get("quantity", 1)
         response_content = (
-            f"Thank you for confirming! Proceeding to Demand Analysis for {qty}x {item} to check warehouse stock and organizational assets..."
+            f"Thank you for confirming! Proceeding to Demand Analysis for {qty}x {item} "
+            "to check warehouse stock and organizational assets..."
         )
     elif is_complete:
         item = updated_draft.get("item", "Item")
@@ -298,26 +435,21 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
             f"Great! I have recorded your requirement for {qty}x {item} ({specs_str}) for {purpose}, needed by {req_date}. "
             f"Please review the summary card below and confirm if everything is accurate to proceed to Demand & Stock Analysis."
         )
-        # response_content = (
-        #     f"Thank you! I have recorded your finalized requirement:\n\n"
-        #     f"• **Item:** {item}\n"
-        #     f"• **Category:** {updated_draft.get('category', 'General')}\n"
-        #     f"• **Quantity:** {qty}\n"
-        #     f"• **Purpose:** {purpose}\n"
-        #     f"• **Specifications:** {specs_str}\n"
-        #     f"• **Required Date:** {req_date}\n\n"
-        #     f"Proceeding to Demand Analysis to check warehouse stock and organizational assets..."
-        # )
     else:
         missing = [f for f in ["item", "quantity", "purpose", "required_date"] if not updated_draft.get(f)]
         response_content = f"Could you help me with {missing[0].replace('_', ' ')} for your request?" if missing else "Could you provide more details?"
 
     print("Final Response Content:\n", response_content)
     ai_message = AIMessage(content=response_content)
-    print("AI Message:\n", ai_message)
 
     return {
         "messages": [ai_message],
+        # Phase 1 fields (via Annotated reducers)
+        "pr": pr_update,
+        "progress": progress_update,
+        "agent_activity": agent_activity,
+        "attention_items": new_attention_items,
+        # DEPRECATED legacy fields — kept for backward compatibility with existing tests
         "requirement_draft": updated_draft,
-        "next_agent": next_step
+        "next_agent": next_step,
     }
