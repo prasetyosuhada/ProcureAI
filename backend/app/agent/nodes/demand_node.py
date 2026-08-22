@@ -178,11 +178,11 @@ async def demand_analysis_node(state: GraphState) -> Dict[str, Any]:
     - Emits `agent_activity` for each tool call (append-only).
     - Emits `attention_items` for budget/policy issues (upsert by deterministic ID).
 
-    Manual Override Protection:
-    - If state['demand']['is_manually_overridden'] is True, this node does NOT
-      overwrite net_new_purchase or is_manually_overridden. The node produces a
-      fresh analysis but yields to the user's previously confirmed quantity.
-      This protection lives here in the node, NOT in reduce_demand (which is a dumb merge).
+    Manual Override & Stale Detection:
+    - If state['demand']['is_manually_overridden'] is True, this node preserves the user's
+      manual net_new_purchase quantity instead of overwriting it with recalculated numbers.
+    - If underlying inventory, assets, or pipeline numbers have changed since the override,
+      it emits an AttentionItem (id=override_stale_{cost_center}) to warn the user.
 
     Legacy backward compatibility:
     - Still writes to `demand_analysis` (DEPRECATED: do not rely in new code).
@@ -249,8 +249,7 @@ async def demand_analysis_node(state: GraphState) -> Dict[str, Any]:
     net_demand = max(0, requested_qty - total_existing)
     recommended_qty = net_demand
 
-    # 3. Manual Override Protection (resolved at node level, not reducer level)
-    #    If user previously overrode the quantity manually, we preserve their decision.
+    # 3. Manual Override Protection (resolved at node level)
     is_manually_overridden = existing_demand.get("is_manually_overridden", False)
     override_reason = existing_demand.get("override_reason")
     if is_manually_overridden:
@@ -329,7 +328,7 @@ async def demand_analysis_node(state: GraphState) -> Dict[str, Any]:
         "validation": "in_progress",  # waiting for user Accept/Modify/Reject on recommendation
     }
 
-    # 8. Build AttentionItems from budget/policy checks
+    # 8. Build AttentionItems from budget/policy checks and stale override detection
     new_attention_items = _build_demand_attention_items(
         recommended_qty=recommended_qty,
         budget_res=budget_res,
@@ -337,6 +336,31 @@ async def demand_analysis_node(state: GraphState) -> Dict[str, Any]:
         purchase_history=purchase_history,
         item_name=item_name,
     )
+
+    # Check for stale manual override:
+    # If is_manually_overridden is True, compare freshly fetched inventory/asset/pipeline data with the previous state in existing_demand
+    if is_manually_overridden and existing_demand:
+        old_inv = existing_demand.get("existing_inventory")
+        old_assets = existing_demand.get("assignable_assets")
+        old_reserved = existing_demand.get("reserved_qty")
+        
+        if (
+            (old_inv is not None and old_inv != inv_qty)
+            or (old_assets is not None and old_assets != asset_qty)
+            or (old_reserved is not None and old_reserved != pipeline_qty)
+        ):
+            stale_item = AttentionItem(
+                id=f"override_stale_{cost_center.lower()}",
+                category="specification",
+                severity="warning",
+                message=(
+                    f"Underlying inventory/asset data has changed since your manual override "
+                    f"of net_new_purchase to {existing_demand.get('net_new_purchase')}. "
+                    f"Please review whether this quantity is still accurate."
+                ),
+                resolved=False
+            ).model_dump()
+            new_attention_items.append(stale_item)
 
     # 9. Build legacy DemandAnalysisSchema (for backward compat with tests)
     demand_analysis_obj = DemandAnalysisSchema(

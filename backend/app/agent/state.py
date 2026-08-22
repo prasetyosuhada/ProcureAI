@@ -98,7 +98,7 @@ class AgentAction(BaseModel):
 # 5. Attention / Exception Items
 # ==============================================================================
 class AttentionItem(BaseModel):
-    id: str = Field(..., description="ID deterministik: spec_{field_name}, budget_{cost_center}, policy_{rule_key}")
+    id: str = Field(..., description="ID deterministik: spec_{field_name}, budget_{cost_center}, policy_{rule_key}, override_stale_{cost_center}")
     category: Literal["specification", "budget", "policy"] = Field(..., description="Kategori isu")
     severity: Literal["warning", "blocking"] = Field(..., description="Tingkat urgensi isu")
     message: str = Field(..., description="Pesan deskriptif issue/rekomendasi")
@@ -157,7 +157,7 @@ def reduce_attention_items(
 ) -> List[Dict[str, Any]]:
     """
     Reducer untuk AttentionItem:
-    - Upsert berdasarkan ID deterministik (spec_{field}, budget_{cost_center}, policy_{rule}).
+    - Upsert berdasarkan ID deterministik (spec_{field}, budget_{cost_center}, policy_{rule}, override_stale_{cost_center}).
     - Menjaga item lama jika sudah ditandai resolved: True oleh user (tidak ditimpa).
     """
     if not existing:
@@ -259,6 +259,14 @@ def reduce_demand(
     return {**existing, **incoming}
 
 
+def reduce_user_action(
+    existing: Optional[str], 
+    incoming: Optional[str]
+) -> Optional[str]:
+    """Reducer untuk user_action (e.g. 'confirm_specifications', 'accept_recommendation')."""
+    return incoming
+
+
 # ==============================================================================
 # 8. Root State Schema (ProcureAIState / GraphState)
 # ==============================================================================
@@ -272,6 +280,7 @@ class ProcureAIState(TypedDict):
     agent_activity: Annotated[List[Dict[str, Any]], reduce_agent_activity]
     attention_items: Annotated[List[Dict[str, Any]], reduce_attention_items]
     recommendation_status: RecommendationStatus
+    user_action: Annotated[Optional[str], reduce_user_action]
     next_agent: Literal["Clarification", "Demand", "GeneratePR", "End"]
 
     # ==========================================================================
@@ -303,8 +312,9 @@ def create_initial_graph_state(user_context_dict: Dict[str, Any]) -> ProcureAISt
         "agent_activity": [],
         "attention_items": [],
         "recommendation_status": "none",
+        "user_action": None,
         "next_agent": "Clarification",
-        "requirement_draft": {},
-        "demand_analysis": {},
+        "requirement_draft": RequirementDraftSchema().model_dump(),
+        "demand_analysis": DemandAnalysisSchema().model_dump(),
         "pr_draft": None
     }

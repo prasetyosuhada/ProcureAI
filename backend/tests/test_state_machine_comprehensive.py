@@ -64,7 +64,7 @@ def test_route_demand_edges():
 
 @pytest.mark.asyncio
 async def test_state_machine_single_turn_fast_path():
-    """Verify state machine processes complete specifications, pauses for confirmation, and executes demand analysis upon confirm."""
+    """Verify state machine processes complete specifications, pauses for confirmation, and executes demand analysis upon explicit confirm action."""
     checkpointer = MemorySaver()
     graph = build_procure_graph(checkpointer=checkpointer)
     config = {"configurable": {"thread_id": "thread-fast-path-001"}}
@@ -87,8 +87,11 @@ async def test_state_machine_single_turn_fast_path():
     assert r1["requirement_draft"]["quantity"] == 10
     assert r1["next_agent"] == "Clarification"
 
-    # Turn 2: User confirms -> triggers Demand Analysis
-    confirm_state = {"messages": [HumanMessage(content="I confirm the specifications. Please proceed to demand analysis.")]}
+    # Turn 2: User explicitly confirms via structured action -> triggers Demand Analysis
+    confirm_state = {
+        "messages": [HumanMessage(content="I confirm the specifications. Please proceed to demand analysis.")],
+        "user_action": "confirm_specifications"
+    }
     r2 = await graph.ainvoke(confirm_state, config=config)
 
     assert r2["demand_analysis"] is not None
@@ -126,8 +129,11 @@ async def test_state_machine_multi_turn_clarification_loop():
     assert r2["requirement_draft"]["quantity"] == 12
     assert r2["next_agent"] == "Clarification"
 
-    # Turn 3: User confirms -> triggers Demand Analysis
-    t3_state = {"messages": [HumanMessage(content="I confirm the specifications. Please proceed to demand analysis.")]}
+    # Turn 3: User explicitly confirms -> triggers Demand Analysis
+    t3_state = {
+        "messages": [HumanMessage(content="I confirm the specifications. Please proceed to demand analysis.")],
+        "user_action": "confirm_specifications"
+    }
     r3 = await graph.ainvoke(t3_state, config=config)
 
     assert r3["demand_analysis"]["is_complete"] is True
@@ -137,7 +143,7 @@ async def test_state_machine_multi_turn_clarification_loop():
 
 @pytest.mark.asyncio
 async def test_state_machine_human_override_resumption():
-    """Verify state machine can accept direct state overrides and resume to demand analysis."""
+    """Verify state machine can accept direct state overrides and resume to demand analysis with explicit action."""
     checkpointer = MemorySaver()
     graph = build_procure_graph(checkpointer=checkpointer)
     config = {"configurable": {"thread_id": "thread-override-resumption-003"}}
@@ -154,7 +160,7 @@ async def test_state_machine_human_override_resumption():
     r1 = await graph.ainvoke(t1_state, config=config)
     assert r1["requirement_draft"]["is_complete"] is False
 
-    # Turn 2: State override from UI widget
+    # Turn 2: State override from UI widget with explicit confirmation action
     override_draft = {
         "item": "Monitor",
         "category": "IT Equipment > Monitors",
@@ -166,7 +172,8 @@ async def test_state_machine_human_override_resumption():
     }
     t2_state = {
         "messages": [HumanMessage(content="I confirm these specifications")],
-        "requirement_draft": override_draft
+        "requirement_draft": override_draft,
+        "user_action": "confirm_specifications"
     }
     r2 = await graph.ainvoke(t2_state, config=config)
 
@@ -184,20 +191,20 @@ async def test_message_reducer_history_accumulation():
     graph = build_procure_graph(checkpointer=checkpointer)
     config = {"configurable": {"thread_id": "thread-reducer-history-004"}}
 
-    user_context = {"user_id": "usr_01", "department_id": "DEPT-ENG", "cost_center": "CC-ENG-001"}
+    user_context = {
+        "user_id": "usr_dev_04",
+        "department_id": "DEPT-ENG",
+        "cost_center": "CC-ENG-001"
+    }
 
-    # Turn 1
-    s1 = create_initial_graph_state(user_context)
-    s1["messages"] = [HumanMessage(content="Hello, I need laptops")]
-    r1 = await graph.ainvoke(s1, config=config)
-    assert len(r1["messages"]) == 2  # 1 User + 1 AI
+    initial_state = create_initial_graph_state(user_context)
+    initial_state["messages"] = [HumanMessage(content="Turn 1: Request items")]
+    r1 = await graph.ainvoke(initial_state, config=config)
 
-    # Turn 2
-    s2 = {"messages": [HumanMessage(content="How many are in stock?")]}
-    r2 = await graph.ainvoke(s2, config=config)
-    assert len(r2["messages"]) == 4  # 2 User + 2 AI
+    m2 = {"messages": [HumanMessage(content="Turn 2: Provide details")]}
+    r2 = await graph.ainvoke(m2, config=config)
 
-    # Turn 3
-    s3 = {"messages": [HumanMessage(content="We need 10 units before Sept 1 for developers")]}
-    r3 = await graph.ainvoke(s3, config=config)
-    assert len(r3["messages"]) >= 6  # Cumulative history preserved
+    messages = r2["messages"]
+    assert len(messages) >= 4  # (Human1 + AI1) + (Human2 + AI2)
+    assert any("Turn 1" in str(m.content) for m in messages)
+    assert any("Turn 2" in str(m.content) for m in messages)

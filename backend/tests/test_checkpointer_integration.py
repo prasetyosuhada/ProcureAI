@@ -30,8 +30,11 @@ async def test_checkpointer_preserves_conversation_history():
     assert r2["next_agent"] == "Clarification"
     assert len(r2["messages"]) >= 4  # Preserved history across turns
 
-    # Turn 3: User confirms -> triggers demand analysis
-    s3 = {"messages": [HumanMessage(content="I confirm the specifications. Please proceed to demand analysis.")]}
+    # Turn 3: User explicitly confirms -> triggers demand analysis
+    s3 = {
+        "messages": [HumanMessage(content="I confirm the specifications. Please proceed to demand analysis.")],
+        "user_action": "confirm_specifications"
+    }
     r3 = await graph.ainvoke(s3, config=config)
 
     assert r3["demand_analysis"]["is_complete"] is True
@@ -60,6 +63,7 @@ async def test_checkpointer_isolates_different_threads():
     rb = await graph.ainvoke(sb, config=config_b)
 
     assert ra["requirement_draft"]["item"] == "Monitor"
-    assert rb["requirement_draft"]["item"] == "Ergonomic Chair"
     assert ra["requirement_draft"]["quantity"] == 5
+
+    assert rb["requirement_draft"]["item"] == "Ergonomic Chair"
     assert rb["requirement_draft"]["quantity"] == 20

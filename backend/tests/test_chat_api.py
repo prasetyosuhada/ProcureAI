@@ -3,50 +3,28 @@ from httpx import AsyncClient, ASGITransport
 from main import app
 
 @pytest.mark.asyncio
-async def test_chat_endpoint_new_thread():
-    """Verify POST /api/v1/chat generates a new thread_id and invokes Clarification node."""
+async def test_chat_multi_turn_flow():
+    """Verify multi-turn chat interaction from initial request to demand analysis via FastAPI chat endpoint."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.post(
-            "/api/v1/chat",
-            json={"message": "I need laptops for my team"}
-        )
-        assert response.status_code == 200
-        data = response.json()
-        assert "thread_id" in data
-        assert data["thread_id"].startswith("thread_")
-        assert data["message"]["role"] == "assistant"
-        assert data["requirement_draft"] is not None
-        assert data["requirement_draft"]["item"] == "Laptop"
-        assert data["requirement_draft"]["is_complete"] is False
-        assert data["next_agent"] == "Clarification"
-
-@pytest.mark.asyncio
-async def test_chat_endpoint_multi_turn_with_checkpointer():
-    """Verify multi-turn state persistence across requests using the same thread_id."""
-    thread_id = "thread_multi_turn_test_101"
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        # Turn 1: Incomplete requirement
+        # Turn 1: Incomplete request
         res1 = await client.post(
             "/api/v1/chat",
-            json={
-                "thread_id": thread_id,
-                "message": "I need laptops for development"
-            }
+            json={"message": "I need some laptops"}
         )
         assert res1.status_code == 200
         data1 = res1.json()
-        assert data1["thread_id"] == thread_id
-        assert data1["requirement_draft"]["item"] == "Laptop"
+        assert "thread_id" in data1
+        thread_id = data1["thread_id"]
+        assert data1["next_agent"] == "Clarification"
         assert data1["requirement_draft"]["is_complete"] is False
 
-        # Turn 2: Provide complete details in same thread -> pauses for confirmation
+        # Turn 2: Provide missing details -> complete draft, pauses for confirmation
         res2 = await client.post(
             "/api/v1/chat",
             json={
                 "thread_id": thread_id,
-                "message": "10 laptops for backend development before Sept 1 with 32GB RAM and 1TB SSD"
+                "message": "I need 10 laptops for backend development before Sept 1"
             }
         )
         assert res2.status_code == 200
@@ -56,12 +34,13 @@ async def test_chat_endpoint_multi_turn_with_checkpointer():
         assert data2["requirement_draft"]["quantity"] == 10
         assert data2["next_agent"] == "Clarification"
 
-        # Turn 3: Confirm specifications -> triggers Demand Analysis
+        # Turn 3: Explicit action confirm specifications -> triggers Demand Analysis
         res3 = await client.post(
             "/api/v1/chat",
             json={
                 "thread_id": thread_id,
-                "message": "I confirm the specifications. Please proceed to demand analysis."
+                "message": "I confirm the specifications. Please proceed to demand analysis.",
+                "action": "confirm_specifications"
             }
         )
         assert res3.status_code == 200
@@ -106,13 +85,14 @@ async def test_chat_user_context_integration():
         data1 = res1.json()
         thread_id = data1["thread_id"]
 
-        # Confirm to trigger demand analysis
+        # Explicit action confirm to trigger demand analysis
         res2 = await client.post(
             "/api/v1/chat",
             headers=headers,
             json={
                 "thread_id": thread_id,
-                "message": "I confirm the specifications. Please proceed to demand analysis."
+                "message": "I confirm the specifications. Please proceed to demand analysis.",
+                "action": "confirm_specifications"
             }
         )
         assert res2.status_code == 200

@@ -48,6 +48,10 @@ async def process_chat_message(
             "user_context": user_context.model_dump()
         }
 
+        # Apply explicit action if provided
+        if payload.action:
+            input_payload["user_action"] = payload.action
+
         # Apply requirement override if provided
         if payload.requirement_override:
             input_payload["requirement_draft"] = payload.requirement_override

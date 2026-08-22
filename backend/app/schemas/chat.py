@@ -17,6 +17,10 @@ class ChatRequest(BaseModel):
         description="Conversational thread ID. Generated if not provided."
     )
     message: str = Field(..., min_length=1, description="Natural language user input")
+    action: Optional[str] = Field(
+        default=None,
+        description="Explicit structured action (e.g. 'confirm_specifications', 'accept_recommendation')"
+    )
     requirement_override: Optional[Dict[str, Any]] = Field(
         default=None,
         description="User override of structured requirement draft"
@@ -26,7 +30,8 @@ class ChatRequest(BaseModel):
         json_schema_extra={
             "example": {
                 "thread_id": "thread_abc123",
-                "message": "I need 10 laptops for new backend developers joining next month."
+                "message": "I need 10 laptops for new backend developers joining next month.",
+                "action": "confirm_specifications"
             }
         }
     )

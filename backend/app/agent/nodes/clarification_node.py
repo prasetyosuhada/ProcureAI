@@ -10,7 +10,6 @@ from app.agent.state import (
     PRArtifact,
     AgentAction,
     AttentionItem,
-    reduce_attention_items,
 )
 from app.agent.prompts import REQUIREMENT_CLARIFICATION_PROMPT
 from app.tools.clarification_tools import get_categories, get_specifications, get_procurement_policy
@@ -181,8 +180,8 @@ def _build_pr_artifact_from_draft(
 ) -> Dict[str, Any]:
     """
     Converts legacy requirement_draft dict into Phase 1 PRArtifact format.
-    Specification fields: is_confirmed is set to True only if all mandatory fields
-    are present AND is_user_confirmed is True (user clicked Confirm button).
+    Specification fields: is_confirmed is set to True ONLY via explicit action (Jalur 1)
+    when is_user_confirmed is True and the draft is complete.
     """
     raw_specs = draft.get("specifications", {})
     pr_specs: List[PRSpecification] = []
@@ -192,7 +191,6 @@ def _build_pr_artifact_from_draft(
             pr_specs.append(PRSpecification(
                 field_name=field_name,
                 value=str(value),
-                # Jalur 2: Clarification Agent sets confirmed only when user explicitly confirmed
                 is_confirmed=is_user_confirmed and bool(draft.get("is_complete"))
             ))
 
@@ -243,14 +241,14 @@ def _build_clarification_attention_items(
             max_ram = policy_result.get("max_specs", {}).get("ram", "")
             if max_ram and ram_val and int(''.join(filter(str.isdigit, str(ram_val)))) > int(''.join(filter(str.isdigit, str(max_ram)))):
                 items.append(AttentionItem(
-                    id=f"spec_ram",
+                    id="spec_ram",
                     category="specification",
                     severity="warning",
                     message=f"RAM '{ram_val}' exceeds company standard maximum of '{max_ram}'. Requires additional approval.",
                     resolved=False
                 ).model_dump())
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Procurement policy check failed in clarification node: {e}", exc_info=True)
 
     return items
 
@@ -269,8 +267,10 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
     - Emits `agent_activity` for each tool call (append-only).
     - Emits `attention_items` for spec/policy issues (upsert by deterministic ID).
 
-    Legacy backward compatibility:
-    - Still writes to `requirement_draft` (DEPRECATED: do not rely in new code).
+    Confirmation Rule:
+    - Routing to Demand and `is_confirmed = True` requires an EXPLICIT structured action
+      (e.g., state['user_action'] == 'confirm_specifications' or state['confirmation_action'] == True).
+      NO chat keyword / substring scanning is used.
     """
     messages: Sequence[BaseMessage] = state.get("messages", [])
     user_context = state.get("user_context", {})
@@ -331,22 +331,19 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
 
     print("Updated Draft:\n", updated_draft)
 
-    # --- Routing: confirm → Demand ---
-    user_lower = last_user_message.lower().strip()
+    # --- Deterministic Confirmation & Routing ---
+    # Strictly check explicit action (no keyword/sentiment parsing from chat message)
     is_complete = bool(updated_draft.get("is_complete"))
-    user_explicit_confirm = any(trigger in user_lower for trigger in [
-        "confirm", "proceed", "setuju", "lanjut", "sesuai", "benar",
-        "ok proceed", "ya proceed", "i confirm", "agree", "siap"
-    ])
+    is_user_confirmed = bool(
+        state.get("user_action") == "confirm_specifications"
+        or state.get("confirmation_action") is True
+        or user_context.get("action") == "confirm_specifications"
+    )
 
-    if is_complete and (user_explicit_confirm or current_draft.get("is_complete")):
+    if is_complete and is_user_confirmed:
         next_step = "Demand"
     else:
         next_step = "Clarification"
-
-    # is_confirmed is True only via Jalur 1 (explicit button) detected via user_explicit_confirm
-    # or Jalur 2 (structured output) when is_complete without ambiguity
-    is_user_confirmed = is_complete and user_explicit_confirm
 
     # --- Phase 1: Build PRArtifact update ---
     pr_update = _build_pr_artifact_from_draft(updated_draft, user_context, is_user_confirmed)
@@ -354,8 +351,6 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
     # --- Phase 1: Build Progress update ---
     if next_step == "Demand":
         progress_update = {"clarification": "complete", "demand_analysis": "in_progress"}
-    elif is_complete:
-        progress_update = {"clarification": "in_progress"}  # waiting for user confirm
     else:
         progress_update = {"clarification": "in_progress"}
 
@@ -390,8 +385,9 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
                 response_instruction = (
                     "The user's requirement details are now complete. "
                     "Write a warm, natural message confirming what you've captured (item, quantity, purpose, required date) "
-                    "and ask the user to check/review the summary card below and confirm if everything is accurate to proceed to Demand & Stock Analysis. "
-                    "Do NOT say you are already proceeding yet. Do NOT use bullet-point templates; write conversationally."
+                    "and ask the user to click the [Confirm Specifications] button on the summary card below "
+                    "to proceed to Demand & Stock Analysis. "
+                    "Do NOT say you are already proceeding yet."
                 )
             else:
                 response_instruction = (
@@ -433,7 +429,7 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
         specs_str = ", ".join([f"{k}: {v}" for k, v in updated_draft.get("specifications", {}).items()]) or "Standard"
         response_content = (
             f"Great! I have recorded your requirement for {qty}x {item} ({specs_str}) for {purpose}, needed by {req_date}. "
-            f"Please review the summary card below and confirm if everything is accurate to proceed to Demand & Stock Analysis."
+            f"Please review the summary card and click [Confirm Specifications] to proceed to Demand & Stock Analysis."
         )
     else:
         missing = [f for f in ["item", "quantity", "purpose", "required_date"] if not updated_draft.get(f)]
@@ -449,6 +445,8 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
         "progress": progress_update,
         "agent_activity": agent_activity,
         "attention_items": new_attention_items,
+        # Reset user_action once consumed
+        "user_action": None,
         # DEPRECATED legacy fields — kept for backward compatibility with existing tests
         "requirement_draft": updated_draft,
         "next_agent": next_step,
