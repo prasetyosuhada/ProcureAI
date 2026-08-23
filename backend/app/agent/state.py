@@ -259,12 +259,14 @@ def reduce_demand(
     return {**existing, **incoming}
 
 
-def reduce_user_action(
-    existing: Optional[str], 
-    incoming: Optional[str]
-) -> Optional[str]:
-    """Reducer untuk user_action (e.g. 'confirm_specifications', 'accept_recommendation')."""
-    return incoming
+def reduce_confirmation_action(
+    existing: Optional[bool], 
+    incoming: Optional[bool]
+) -> bool:
+    """Reducer untuk confirmation_action (Single Source of Truth boolean flag untuk aksi konfirmasi spesifikasi)."""
+    if incoming is None:
+        return bool(existing)
+    return bool(incoming)
 
 
 # ==============================================================================
@@ -280,7 +282,7 @@ class ProcureAIState(TypedDict):
     agent_activity: Annotated[List[Dict[str, Any]], reduce_agent_activity]
     attention_items: Annotated[List[Dict[str, Any]], reduce_attention_items]
     recommendation_status: RecommendationStatus
-    user_action: Annotated[Optional[str], reduce_user_action]
+    confirmation_action: Annotated[bool, reduce_confirmation_action]
     next_agent: Literal["Clarification", "Demand", "GeneratePR", "End"]
 
     # ==========================================================================
@@ -312,7 +314,7 @@ def create_initial_graph_state(user_context_dict: Dict[str, Any]) -> ProcureAISt
         "agent_activity": [],
         "attention_items": [],
         "recommendation_status": "none",
-        "user_action": None,
+        "confirmation_action": False,
         "next_agent": "Clarification",
         "requirement_draft": RequirementDraftSchema().model_dump(),
         "demand_analysis": DemandAnalysisSchema().model_dump(),

@@ -181,7 +181,7 @@ def _build_pr_artifact_from_draft(
     """
     Converts legacy requirement_draft dict into Phase 1 PRArtifact format.
     Specification fields: is_confirmed is set to True ONLY via explicit action (Jalur 1)
-    when is_user_confirmed is True and the draft is complete.
+    when is_user_confirmed is True (state['confirmation_action'] is True) and draft is complete.
     """
     raw_specs = draft.get("specifications", {})
     pr_specs: List[PRSpecification] = []
@@ -268,9 +268,9 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
     - Emits `attention_items` for spec/policy issues (upsert by deterministic ID).
 
     Confirmation Rule:
-    - Routing to Demand and `is_confirmed = True` requires an EXPLICIT structured action
-      (e.g., state['user_action'] == 'confirm_specifications' or state['confirmation_action'] == True).
-      NO chat keyword / substring scanning is used.
+    - Single Source of Truth: state['confirmation_action'] (bool).
+    - Routing to Demand and `is_confirmed = True` requires confirmation_action=True.
+      NO chat keyword / substring scanning or secondary string fields are used.
     """
     messages: Sequence[BaseMessage] = state.get("messages", [])
     user_context = state.get("user_context", {})
@@ -331,14 +331,9 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
 
     print("Updated Draft:\n", updated_draft)
 
-    # --- Deterministic Confirmation & Routing ---
-    # Strictly check explicit action (no keyword/sentiment parsing from chat message)
+    # --- Deterministic Confirmation & Routing (Single Source of Truth) ---
     is_complete = bool(updated_draft.get("is_complete"))
-    is_user_confirmed = bool(
-        state.get("user_action") == "confirm_specifications"
-        or state.get("confirmation_action") is True
-        or user_context.get("action") == "confirm_specifications"
-    )
+    is_user_confirmed = bool(state.get("confirmation_action") is True)
 
     if is_complete and is_user_confirmed:
         next_step = "Demand"
@@ -445,8 +440,8 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
         "progress": progress_update,
         "agent_activity": agent_activity,
         "attention_items": new_attention_items,
-        # Reset user_action once consumed
-        "user_action": None,
+        # Reset confirmation_action once consumed
+        "confirmation_action": False,
         # DEPRECATED legacy fields — kept for backward compatibility with existing tests
         "requirement_draft": updated_draft,
         "next_agent": next_step,

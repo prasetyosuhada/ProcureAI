@@ -34,13 +34,13 @@ async def test_chat_multi_turn_flow():
         assert data2["requirement_draft"]["quantity"] == 10
         assert data2["next_agent"] == "Clarification"
 
-        # Turn 3: Explicit action confirm specifications -> triggers Demand Analysis
+        # Turn 3: Explicit action confirm specifications via confirmation_action=True -> triggers Demand Analysis
         res3 = await client.post(
             "/api/v1/chat",
             json={
                 "thread_id": thread_id,
                 "message": "I confirm the specifications. Please proceed to demand analysis.",
-                "action": "confirm_specifications"
+                "confirmation_action": True
             }
         )
         assert res3.status_code == 200
@@ -92,7 +92,7 @@ async def test_chat_user_context_integration():
             json={
                 "thread_id": thread_id,
                 "message": "I confirm the specifications. Please proceed to demand analysis.",
-                "action": "confirm_specifications"
+                "confirmation_action": True
             }
         )
         assert res2.status_code == 200

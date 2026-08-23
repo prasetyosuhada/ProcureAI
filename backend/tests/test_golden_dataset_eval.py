@@ -28,7 +28,7 @@ async def test_scenario_golden_dataset_execution(scenario: Scenario):
     if output_state.get("requirement_draft", {}).get("is_complete") and scenario.expected_recommended_quantity is not None and not output_state.get("demand_analysis", {}).get("is_complete"):
         confirm_input = {
             "messages": [HumanMessage(content="I confirm the extracted specifications and requirements. Please proceed to demand analysis.")],
-            "user_action": "confirm_specifications"
+            "confirmation_action": True
         }
         output_state = await graph.ainvoke(confirm_input, config=config)
 

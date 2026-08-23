@@ -16,6 +16,7 @@ from app.agent.state import (
     reduce_pr_artifact,
     reduce_progress,
     reduce_demand,
+    reduce_confirmation_action,
     create_initial_graph_state,
     RequirementDraftSchema,
     DemandAnalysisSchema,
@@ -150,6 +151,14 @@ def test_progress_reducer():
     assert result["validation"] == "in_progress"
 
 
+def test_confirmation_action_reducer():
+    """Verify reduce_confirmation_action updates boolean state properly."""
+    assert reduce_confirmation_action(False, True) is True
+    assert reduce_confirmation_action(True, False) is False
+    assert reduce_confirmation_action(True, None) is True
+    assert reduce_confirmation_action(False, None) is False
+
+
 def test_create_initial_graph_state():
     """Verify create_initial_graph_state helper function sets up initial Phase 1 workspace state."""
     user_context = {
@@ -168,4 +177,5 @@ def test_create_initial_graph_state():
     assert state["agent_activity"] == []
     assert state["attention_items"] == []
     assert state["recommendation_status"] == "none"
+    assert state["confirmation_action"] is False
     assert state["next_agent"] == "Clarification"

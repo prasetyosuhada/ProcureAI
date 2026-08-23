@@ -30,10 +30,10 @@ async def test_checkpointer_preserves_conversation_history():
     assert r2["next_agent"] == "Clarification"
     assert len(r2["messages"]) >= 4  # Preserved history across turns
 
-    # Turn 3: User explicitly confirms -> triggers demand analysis
+    # Turn 3: User explicitly confirms via confirmation_action=True -> triggers demand analysis
     s3 = {
         "messages": [HumanMessage(content="I confirm the specifications. Please proceed to demand analysis.")],
-        "user_action": "confirm_specifications"
+        "confirmation_action": True
     }
     r3 = await graph.ainvoke(s3, config=config)
 

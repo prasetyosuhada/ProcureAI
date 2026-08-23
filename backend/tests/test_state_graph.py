@@ -36,10 +36,10 @@ async def test_clarification_loop_state_machine():
     assert r2["requirement_draft"]["is_complete"] is True
     assert r2["requirement_draft"]["quantity"] == 10
 
-    # Turn 3: User explicitly confirms -> transitions to Demand Analysis
+    # Turn 3: User explicitly confirms via confirmation_action=True -> transitions to Demand Analysis
     third_input = {
         "messages": [HumanMessage(content="I confirm the extracted specifications and requirements. Please proceed to demand analysis.")],
-        "user_action": "confirm_specifications"
+        "confirmation_action": True
     }
     r3 = await app.ainvoke(third_input, config=config)
     assert r3["next_agent"] == "GeneratePR"
@@ -65,10 +65,10 @@ async def test_single_turn_complete_state_machine():
     assert r1["requirement_draft"]["quantity"] == 10
     assert r1["next_agent"] == "Clarification"
 
-    # Turn 2: User explicitly confirms specifications -> triggers Demand Analysis
+    # Turn 2: User explicitly confirms specifications via confirmation_action=True -> triggers Demand Analysis
     confirm_state = {
         "messages": [HumanMessage(content="I confirm the specifications. Please proceed to demand analysis.")],
-        "user_action": "confirm_specifications"
+        "confirmation_action": True
     }
     r2 = await app.ainvoke(confirm_state, config=config)
 

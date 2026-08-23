@@ -17,9 +17,9 @@ class ChatRequest(BaseModel):
         description="Conversational thread ID. Generated if not provided."
     )
     message: str = Field(..., min_length=1, description="Natural language user input")
-    action: Optional[str] = Field(
-        default=None,
-        description="Explicit structured action (e.g. 'confirm_specifications', 'accept_recommendation')"
+    confirmation_action: bool = Field(
+        default=False,
+        description="Explicit boolean flag sent when user clicks [Confirm Specifications]"
     )
     requirement_override: Optional[Dict[str, Any]] = Field(
         default=None,
@@ -31,7 +31,7 @@ class ChatRequest(BaseModel):
             "example": {
                 "thread_id": "thread_abc123",
                 "message": "I need 10 laptops for new backend developers joining next month.",
-                "action": "confirm_specifications"
+                "confirmation_action": False
             }
         }
     )

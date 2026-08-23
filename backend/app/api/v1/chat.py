@@ -35,22 +35,19 @@ async def process_chat_message(
 
         logger.info(
             f"Processing chat [thread_id={thread_id}, user={user_context.user_id}, "
-            f"dept={user_context.department_id}]: {sanitized_msg[:50]}..."
+            f"dept={user_context.department_id}, confirmation_action={payload.confirmation_action}]: {sanitized_msg[:50]}..."
         )
 
         # 1. Obtain compiled state machine with checkpointer
         graph = await get_compiled_procure_graph()
         config = {"configurable": {"thread_id": thread_id}}
 
-        # 2. Invoke Graph with input message and user context
+        # 2. Invoke Graph with input message, user context, and confirmation action flag
         input_payload = {
             "messages": [HumanMessage(content=sanitized_msg)],
-            "user_context": user_context.model_dump()
+            "user_context": user_context.model_dump(),
+            "confirmation_action": payload.confirmation_action
         }
-
-        # Apply explicit action if provided
-        if payload.action:
-            input_payload["user_action"] = payload.action
 
         # Apply requirement override if provided
         if payload.requirement_override:

@@ -87,10 +87,10 @@ async def test_state_machine_single_turn_fast_path():
     assert r1["requirement_draft"]["quantity"] == 10
     assert r1["next_agent"] == "Clarification"
 
-    # Turn 2: User explicitly confirms via structured action -> triggers Demand Analysis
+    # Turn 2: User explicitly confirms via confirmation_action=True -> triggers Demand Analysis
     confirm_state = {
         "messages": [HumanMessage(content="I confirm the specifications. Please proceed to demand analysis.")],
-        "user_action": "confirm_specifications"
+        "confirmation_action": True
     }
     r2 = await graph.ainvoke(confirm_state, config=config)
 
@@ -129,10 +129,10 @@ async def test_state_machine_multi_turn_clarification_loop():
     assert r2["requirement_draft"]["quantity"] == 12
     assert r2["next_agent"] == "Clarification"
 
-    # Turn 3: User explicitly confirms -> triggers Demand Analysis
+    # Turn 3: User explicitly confirms via confirmation_action=True -> triggers Demand Analysis
     t3_state = {
         "messages": [HumanMessage(content="I confirm the specifications. Please proceed to demand analysis.")],
-        "user_action": "confirm_specifications"
+        "confirmation_action": True
     }
     r3 = await graph.ainvoke(t3_state, config=config)
 
@@ -143,7 +143,7 @@ async def test_state_machine_multi_turn_clarification_loop():
 
 @pytest.mark.asyncio
 async def test_state_machine_human_override_resumption():
-    """Verify state machine can accept direct state overrides and resume to demand analysis with explicit action."""
+    """Verify state machine can accept direct state overrides and resume to demand analysis with explicit confirmation action."""
     checkpointer = MemorySaver()
     graph = build_procure_graph(checkpointer=checkpointer)
     config = {"configurable": {"thread_id": "thread-override-resumption-003"}}
@@ -173,7 +173,7 @@ async def test_state_machine_human_override_resumption():
     t2_state = {
         "messages": [HumanMessage(content="I confirm these specifications")],
         "requirement_draft": override_draft,
-        "user_action": "confirm_specifications"
+        "confirmation_action": True
     }
     r2 = await graph.ainvoke(t2_state, config=config)
 

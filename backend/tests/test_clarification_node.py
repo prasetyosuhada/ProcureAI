@@ -69,9 +69,10 @@ async def test_clarification_node_no_keyword_false_positive():
     state["messages"] = [
         HumanMessage(content="tolong sesuaikan RAM-nya jadi 16GB")
     ]
+    state["confirmation_action"] = False
     
     result = await requirement_clarification_node(state)
-    # Must NOT route to Demand because no explicit action was sent
+    # Must NOT route to Demand because confirmation_action is False
     assert result["next_agent"] == "Clarification"
     # Specifications must NOT be confirmed
     for spec in result["pr"].get("specifications", []):
@@ -80,7 +81,7 @@ async def test_clarification_node_no_keyword_false_positive():
 @pytest.mark.asyncio
 async def test_clarification_node_explicit_action_confirm():
     """
-    Verify that only an explicit action (e.g. user_action='confirm_specifications')
+    Verify that only the explicit boolean flag confirmation_action=True
     advances the workflow to Demand and marks specifications as confirmed.
     """
     state = create_initial_graph_state({"user_id": "usr_1", "department_id": "DEPT-ENG"})
@@ -93,7 +94,7 @@ async def test_clarification_node_explicit_action_confirm():
         "specifications": {"ram": "32GB", "storage": "1TB SSD"},
         "is_complete": True
     }
-    state["user_action"] = "confirm_specifications"
+    state["confirmation_action"] = True
     state["messages"] = [
         HumanMessage(content="Confirmed via UI button")
     ]
