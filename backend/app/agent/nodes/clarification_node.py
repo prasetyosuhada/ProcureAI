@@ -149,6 +149,11 @@ def extract_requirement_heuristics(user_text: str, current_draft: Dict[str, Any]
     elif "512gb" in text_lower or "512 gb" in text_lower:
         specs["storage"] = "512GB SSD"
 
+    # GPU
+    gpu_match = re.search(r'\b(rtx\s*\d{4}[a-zA-Z0-9\s]*|gtx\s*\d{4}[a-zA-Z0-9\s]*|apple\s*m\d\s*max|apple\s*m\d\s*pro)\b', text_lower)
+    if gpu_match:
+        specs["gpu"] = gpu_match.group(1).upper().strip()
+
     # 5. Extract Required Date
     if "sept" in text_lower or "september" in text_lower:
         draft["required_date"] = "2026-09-01"
@@ -269,8 +274,8 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
 
     Confirmation Rule:
     - Single Source of Truth: state['confirmation_action'] (bool).
-    - Routing to Demand and `is_confirmed = True` requires confirmation_action=True.
-      NO chat keyword / substring scanning or secondary string fields are used.
+    - Routing to Demand and `is_confirmed = True` requires confirmation_action=True AND is_complete=True.
+    - If confirmation_action is True but is_complete=False, explicit feedback explains missing fields.
     """
     messages: Sequence[BaseMessage] = state.get("messages", [])
     user_context = state.get("user_context", {})
@@ -376,6 +381,13 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
                     "Acknowledge the confirmation warmly and state that you are proceeding to Demand Analysis "
                     "to check warehouse stock, organizational assets, and budget availability."
                 )
+            elif state.get("confirmation_action") is True and not is_complete:
+                response_instruction = (
+                    f"The user attempted to confirm specifications, but the requirement is incomplete. "
+                    f"The following mandatory fields are still missing: {', '.join(missing_fields)}. "
+                    f"Politely and explicitly inform them that the requirement cannot be confirmed yet until these fields are provided, "
+                    f"and ask for the {missing_fields[0].replace('_', ' ')}."
+                )
             elif is_complete:
                 response_instruction = (
                     "The user's requirement details are now complete. "
@@ -415,6 +427,13 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
         response_content = (
             f"Thank you for confirming! Proceeding to Demand Analysis for {qty}x {item} "
             "to check warehouse stock and organizational assets..."
+        )
+    elif state.get("confirmation_action") is True and not is_complete:
+        missing = [f for f in ["item", "quantity", "purpose", "required_date"] if not updated_draft.get(f)]
+        missing_str = ", ".join([m.replace("_", " ").title() for m in missing])
+        response_content = (
+            f"⚠️ **Cannot confirm specifications yet:** The following mandatory details are still missing: **{missing_str}**. "
+            f"Please provide the {missing[0].replace('_', ' ')} first before confirming."
         )
     elif is_complete:
         item = updated_draft.get("item", "Item")

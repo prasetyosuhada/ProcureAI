@@ -3,12 +3,12 @@ from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 
 from app.agent.graph import build_procure_graph
-from app.eval.golden_dataset import GOLDEN_SCENARIOS, Scenario
+from app.eval.dataset import GOLDEN_DATASET, GoldenScenario
 from app.eval.evaluator import evaluate_with_llm_judge
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("scenario", GOLDEN_SCENARIOS, ids=[s.id for s in GOLDEN_SCENARIOS])
-async def test_scenario_golden_dataset_execution(scenario: Scenario):
+@pytest.mark.parametrize("scenario", GOLDEN_DATASET, ids=[s.id for s in GOLDEN_DATASET])
+async def test_scenario_golden_dataset_execution(scenario: GoldenScenario):
     """
     Executes each Golden Dataset scenario against the ProcureAI LangGraph pipeline
     and asserts with the automated LLM Judge.
