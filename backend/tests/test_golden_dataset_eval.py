@@ -45,7 +45,5 @@ async def test_scenario_golden_dataset_execution(scenario: GoldenScenario):
     judge_result = await evaluate_with_llm_judge(scenario, ai_text, output_state)
 
     # Assert evaluation criteria
-    assert judge_result["passed"] is True, f"Scenario {scenario.id} failed eval: {judge_result['feedback']}"
-    assert judge_result["field_completeness_score"] >= 0.8
-    assert judge_result["spec_accuracy_score"] >= 0.8
-    assert judge_result["recommendation_accuracy_score"] >= 0.8
+    assert judge_result.passed is True, f"Scenario {scenario.id} failed eval: {judge_result.reasoning}"
+    assert judge_result.score >= 0.8

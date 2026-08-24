@@ -49,6 +49,7 @@ async def test_chat_endpoint_with_requirement_override():
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         payload = {
             "message": "Update requirement directly",
+            "confirmation_action": True,
             "requirement_override": {
                 "item": "Ergonomic Chair",
                 "category": "Office Furniture > Ergonomic Chairs",
