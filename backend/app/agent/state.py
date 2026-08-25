@@ -62,6 +62,10 @@ class PRArtifact(BaseModel):
     required_date: Optional[str] = Field(default=None, description="Target tanggal kebutuhan (YYYY-MM-DD)")
     specifications: List[PRSpecification] = Field(default_factory=list, description="Daftar spesifikasi teknis item")
     status: str = Field(default="draft", description="Status dokumen PR (draft/submitted/approved)")
+    is_ready_for_confirmation: bool = Field(
+        default=False,
+        description="True jika seluruh field wajib (item, quantity, purpose, required_date) telah terisi dan siap dikonfirmasi oleh user"
+    )
 
     model_config = ConfigDict(extra="ignore")
 

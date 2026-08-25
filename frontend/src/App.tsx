@@ -188,14 +188,10 @@ export const App: React.FC = () => {
       ? 'GeneratePR'
       : 'Clarification';
 
-  // Condition to display [Confirm Specifications] action prompt
+  // Condition to display [Confirm Specifications] action prompt (Single Source of Truth from backend)
   const showConfirmPrompt = Boolean(
     requestState?.progress?.clarification !== 'complete' &&
-      requestState?.pr?.item_name &&
-      requestState?.pr?.quantity &&
-      requestState?.pr?.quantity > 0 &&
-      requestState?.pr?.purpose &&
-      requestState?.pr?.required_date
+      requestState?.pr?.is_ready_for_confirmation
   );
 
   return (

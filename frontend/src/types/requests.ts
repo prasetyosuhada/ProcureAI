@@ -26,6 +26,7 @@ export interface PRArtifact {
   required_date?: string | null;
   specifications: PRSpecification[];
   status: string;
+  is_ready_for_confirmation?: boolean;
 }
 
 export interface DemandBreakdown {

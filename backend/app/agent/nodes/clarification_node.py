@@ -208,7 +208,8 @@ def _build_pr_artifact_from_draft(
         purpose=draft.get("purpose"),
         required_date=draft.get("required_date"),
         specifications=pr_specs,
-        status="draft"
+        status="draft",
+        is_ready_for_confirmation=bool(draft.get("is_complete"))
     )
     return artifact.model_dump()
 
