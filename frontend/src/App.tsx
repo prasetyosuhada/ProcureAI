@@ -3,18 +3,14 @@ import { Navbar } from './components/Navbar';
 import { RequestProgressStepper } from './components/RequestProgressStepper';
 import { ChatWindow } from './components/ChatWindow';
 import { ChatInput } from './components/ChatInput';
+import { PRArtifactCard } from './components/PRArtifactCard';
+import { DemandAnalysisPanel } from './components/DemandAnalysisPanel';
+import { AgentActivityStrip } from './components/AgentActivityStrip';
 import { UserContext, ChatMessage } from './types/chat';
 import { useRequestState } from './hooks/useRequestState';
 import { chatApi } from './api/chatApi';
 import { requestsApi } from './api/requestsApi';
-import {
-  FileText,
-  Boxes,
-  Activity,
-  AlertTriangle,
-  RefreshCw,
-  Sparkles,
-} from 'lucide-react';
+import { AlertTriangle, RefreshCw } from 'lucide-react';
 
 export const App: React.FC = () => {
   const [threadId, setThreadId] = useState<string>(() => {
@@ -251,7 +247,7 @@ export const App: React.FC = () => {
         )}
 
         {/* 3. Split-Pane Workstation Layout */}
-        <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-[580px]">
+        <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-[580px] pb-6">
           {/* Left Column: Conversation Pane (Col span: 6/12) */}
           <div className="lg:col-span-6 flex flex-col glass-panel rounded-2xl border border-slate-800/80 overflow-hidden shadow-xl shadow-black/40">
             <div className="p-3.5 border-b border-slate-800/80 bg-slate-900/60 flex items-center justify-between">
@@ -293,110 +289,19 @@ export const App: React.FC = () => {
             </div>
           </div>
 
-          {/* Right Column: Procurement Artifacts & Demand Panel (Col span: 6/12) */}
+          {/* Right Column: Interactive Artifact Workspace (Col span: 6/12) */}
           <div className="lg:col-span-6 flex flex-col gap-4">
-            {/* Header for Artifact Workspace */}
-            <div className="glass-panel rounded-2xl border border-slate-800/80 p-5 flex flex-col gap-4 shadow-xl shadow-black/40">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-3.5">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
-                    <FileText className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-200">
-                      Live Procurement Artifacts
-                    </h3>
-                    <p className="text-xs text-slate-400">
-                      Auto-generated PR specifications & demand telemetry
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-1.5 text-xs text-slate-400 bg-slate-800/60 px-2.5 py-1 rounded-lg border border-slate-700/50">
-                  <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-                  <span>
-                    {isStateLoading
-                      ? 'Syncing State...'
-                      : requestState
-                      ? 'State Hydrated'
-                      : 'Connecting...'}
-                  </span>
-                </div>
-              </div>
+            {/* 1. Purchase Requisition Artifact Card */}
+            <PRArtifactCard pr={requestState?.pr} />
 
-              {/* State Diagnostics Telemetry */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800/80 flex flex-col gap-1">
-                  <span className="text-[11px] text-slate-500 font-medium">
-                    PR Item
-                  </span>
-                  <span className="text-xs font-semibold text-slate-200 truncate">
-                    {requestState?.pr?.item_name || '—'}
-                  </span>
-                </div>
-                <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800/80 flex flex-col gap-1">
-                  <span className="text-[11px] text-slate-500 font-medium">
-                    Qty Requested
-                  </span>
-                  <span className="text-xs font-semibold text-slate-200">
-                    {requestState?.pr?.quantity ?? '—'}
-                  </span>
-                </div>
-                <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800/80 flex flex-col gap-1">
-                  <span className="text-[11px] text-slate-500 font-medium">
-                    Net Purchase
-                  </span>
-                  <span className="text-xs font-semibold text-emerald-400">
-                    {requestState?.demand?.net_new_purchase ?? '—'}
-                  </span>
-                </div>
-                <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800/80 flex flex-col gap-1">
-                  <span className="text-[11px] text-slate-500 font-medium">
-                    Attention Flags
-                  </span>
-                  <span className="text-xs font-semibold text-amber-400">
-                    {requestState?.attention_items?.length ?? 0}
-                  </span>
-                </div>
-              </div>
+            {/* 2. Demand & Inventory Optimization Panel */}
+            <DemandAnalysisPanel
+              demand={requestState?.demand}
+              progress={requestState?.progress}
+            />
 
-              {/* Placeholder Card: Ready for Step 3c & 3d */}
-              <div className="flex flex-col items-center justify-center p-8 rounded-xl border border-dashed border-slate-800 bg-slate-900/40 text-center gap-3">
-                <div className="w-12 h-12 rounded-2xl bg-slate-800/80 border border-slate-700/80 flex items-center justify-center text-slate-400">
-                  <Boxes className="w-6 h-6 text-indigo-400" />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <h4 className="text-sm font-semibold text-slate-300">
-                    Artifact Panel Workspace (Step 3c Ready)
-                  </h4>
-                  <p className="text-xs text-slate-400 max-w-sm">
-                    In Step 3c & 3d, this panel will host the live interactive{' '}
-                    <code className="text-indigo-300 font-mono text-[11px]">
-                      PRArtifactCard
-                    </code>
-                    ,{' '}
-                    <code className="text-indigo-300 font-mono text-[11px]">
-                      DemandAnalysisPanel
-                    </code>
-                    ,{' '}
-                    <code className="text-indigo-300 font-mono text-[11px]">
-                      AttentionBanner
-                    </code>
-                    , and{' '}
-                    <code className="text-indigo-300 font-mono text-[11px]">
-                      SubmissionBar
-                    </code>
-                    .
-                  </p>
-                </div>
-                <div className="flex items-center gap-2 text-[11px] text-slate-500 bg-slate-900/90 px-3 py-1.5 rounded-lg border border-slate-800">
-                  <Activity className="w-3.5 h-3.5 text-blue-400" />
-                  <span>
-                    Agent Activity telemetry:{' '}
-                    {requestState?.agent_activity?.length ?? 0} actions recorded
-                  </span>
-                </div>
-              </div>
-            </div>
+            {/* 3. Agent Activity & Execution Telemetry */}
+            <AgentActivityStrip activities={requestState?.agent_activity} />
           </div>
         </div>
       </main>

@@ -34,6 +34,7 @@ async def test_clarification_node_incomplete():
     assert len(result["messages"]) == 1
     assert result["next_agent"] == "Clarification"
     assert result["requirement_draft"]["is_complete"] is False
+    assert result["pr"]["is_ready_for_confirmation"] is False
 
 @pytest.mark.asyncio
 async def test_clarification_node_complete():
@@ -47,6 +48,7 @@ async def test_clarification_node_complete():
     assert result["next_agent"] == "Clarification"
     assert result["requirement_draft"]["is_complete"] is True
     assert result["requirement_draft"]["quantity"] == 10
+    assert result["pr"]["is_ready_for_confirmation"] is True
     assert "confirm" in result["messages"][0].content.lower() or "summary" in result["messages"][0].content.lower() or "demand" in result["messages"][0].content.lower()
 
 @pytest.mark.asyncio
