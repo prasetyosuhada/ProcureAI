@@ -1,10 +1,13 @@
 import React from 'react';
 import { RequestProgress, StageStatus } from '../types/requests';
-import { CheckCircle2, Loader2, AlertCircle } from 'lucide-react';
+import { CheckCircle2, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
 
-interface RequestProgressStepperProps {
+export interface RequestProgressStepperProps {
   progress?: RequestProgress;
+  isLoading?: boolean;
+  error?: string | null;
   className?: string;
+  onRetry?: () => void;
 }
 
 interface StepConfig {
@@ -38,18 +41,68 @@ const STEPS: StepConfig[] = [
 
 export const RequestProgressStepper: React.FC<RequestProgressStepperProps> = ({
   progress,
+  isLoading = false,
+  error = null,
   className = '',
+  onRetry,
 }) => {
-  // Default fallback if progress is undefined
-  const defaultProgress: RequestProgress = {
-    clarification: 'in_progress',
-    demand_analysis: 'pending',
-    validation: 'pending',
-    ready_for_submission: 'pending',
-  };
+  // 1. Error State: Render explicit error message instead of guessing state
+  if (error) {
+    return (
+      <div
+        className={`w-full bg-rose-950/40 border border-rose-800/60 rounded-xl p-3.5 backdrop-blur-md flex items-center justify-between gap-3 text-rose-300 text-xs ${className}`}
+      >
+        <div className="flex items-center gap-2.5">
+          <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+          <span>Failed to load workflow status: {error}</span>
+        </div>
+        {onRetry && (
+          <button
+            onClick={onRetry}
+            className="flex items-center gap-1 px-2.5 py-1 bg-rose-900/60 hover:bg-rose-800 border border-rose-700 rounded text-rose-200 text-xs font-medium transition-colors"
+          >
+            <RefreshCw className="w-3 h-3" />
+            <span>Retry</span>
+          </button>
+        )}
+      </div>
+    );
+  }
 
-  const currentProgress = progress || defaultProgress;
+  // 2. Loading State: Render skeleton placeholder while fetching
+  if (isLoading && !progress) {
+    return (
+      <div
+        className={`w-full bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 backdrop-blur-md animate-pulse ${className}`}
+      >
+        <div className="flex items-center justify-between">
+          {STEPS.map((step, idx) => (
+            <React.Fragment key={step.key}>
+              <div className="flex items-center gap-3 z-10">
+                <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700/60 flex items-center justify-center">
+                  <div className="w-3.5 h-3.5 rounded-full bg-slate-700" />
+                </div>
+                <div className="hidden sm:flex flex-col gap-1.5">
+                  <div className="w-20 h-3 bg-slate-800 rounded" />
+                  <div className="w-14 h-2.5 bg-slate-800/60 rounded" />
+                </div>
+              </div>
+              {idx < STEPS.length - 1 && (
+                <div className="flex-1 mx-2 sm:mx-4 h-[2px] bg-slate-800" />
+              )}
+            </React.Fragment>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
+  // 3. No progress data available yet
+  if (!progress) {
+    return null;
+  }
+
+  // 4. Normal State: Purely bound to backend progress data
   const renderStatusIcon = (status: StageStatus, stepIndex: number) => {
     switch (status) {
       case 'complete':
@@ -116,7 +169,7 @@ export const RequestProgressStepper: React.FC<RequestProgressStepperProps> = ({
     >
       <div className="flex items-center justify-between relative">
         {STEPS.map((step, idx) => {
-          const status = currentProgress[step.key] || 'pending';
+          const status = progress[step.key] || 'pending';
           const isLast = idx === STEPS.length - 1;
           const isLineActive = status === 'complete';
 

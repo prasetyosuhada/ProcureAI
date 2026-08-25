@@ -1,6 +1,57 @@
 import pytest
+from unittest.mock import patch
 from httpx import AsyncClient, ASGITransport
 from main import app
+
+@pytest.fixture(autouse=True)
+def mock_demand_tools():
+    """
+    Deterministic mock for external tools in demand analysis node.
+    Ensures unit/integration tests are completely isolated from Postgres / external services.
+    Stock (3) + Assets (5) = 8 available units.
+    """
+    with patch("app.agent.nodes.demand_node.get_inventory") as mock_inv, \
+         patch("app.agent.nodes.demand_node.get_assets") as mock_assets, \
+         patch("app.agent.nodes.demand_node.get_open_prs_and_pos") as mock_pipe, \
+         patch("app.agent.nodes.demand_node.get_budget_status") as mock_budget, \
+         patch("app.agent.nodes.demand_node.get_purchase_history") as mock_hist:
+        
+        mock_inv.invoke.return_value = {
+            "item": "Laptop",
+            "available_quantity": 3,
+            "location": "Warehouse A-12",
+            "condition": "New"
+        }
+        mock_assets.invoke.return_value = {
+            "item": "Laptop",
+            "currently_unused": 3,
+            "scheduled_returns_next_30_days": 2,
+            "total_available_soon": 5,
+            "notes": "Returning from contractor offboarding"
+        }
+        mock_pipe.invoke.return_value = {
+            "item": "Laptop",
+            "open_prs_count": 0,
+            "open_pos_count": 0,
+            "pipeline_quantity": 0,
+            "details": []
+        }
+        mock_budget.invoke.return_value = {
+            "cost_center": "CC-ENG-001",
+            "allocated_budget": 50000.0,
+            "committed_spend": 12000.0,
+            "actual_spend": 8000.0,
+            "remaining_budget": 30000.0,
+            "status": "healthy"
+        }
+        mock_hist.invoke.return_value = {
+            "item": "Laptop",
+            "average_unit_price": 1200.0,
+            "last_purchase_price": 1200.0,
+            "preferred_vendor": "Dell Enterprise Direct"
+        }
+        yield
+
 
 @pytest.mark.asyncio
 async def test_get_request_state_new_and_populated():
@@ -90,10 +141,10 @@ async def test_recommendation_action_modify():
         )
         await client.post(f"/api/v1/requests/{thread_id}/confirm-specifications")
 
-        # Check state has demand
+        # Check state has demand (Requested: 10 - Stock: 3 - Assets: 5 = 2)
         s1 = (await client.get(f"/api/v1/requests/{thread_id}/state")).json()
         assert s1["demand"] is not None
-        assert s1["demand"]["net_new_purchase"] == 2  # default 10 - 8 = 2
+        assert s1["demand"]["net_new_purchase"] == 2  # Deterministic calculation: 10 - 8 = 2
 
         # User modifies recommendation to 8 with justification notes
         mod_res = await client.post(

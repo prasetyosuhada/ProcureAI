@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Navbar } from './components/Navbar';
 import { RequestProgressStepper } from './components/RequestProgressStepper';
 import { ChatWindow } from './components/ChatWindow';
@@ -23,12 +23,25 @@ export const App: React.FC = () => {
     );
   });
 
-  const [userContext, setUserContext] = useState<UserContext>({
+  const [rawUserContext, setRawUserContext] = useState<UserContext>({
     userId: 'usr_pras',
     userName: 'Prasetyo Suhada',
     departmentId: 'DEPT-ENG',
     costCenter: 'CC-ENG-001',
   });
+
+  // Stabilize userContext reference across renders to prevent infinite fetch loops
+  const userContext = useMemo<UserContext>(() => ({
+    userId: rawUserContext.userId,
+    userName: rawUserContext.userName,
+    departmentId: rawUserContext.departmentId,
+    costCenter: rawUserContext.costCenter,
+  }), [
+    rawUserContext.userId,
+    rawUserContext.userName,
+    rawUserContext.departmentId,
+    rawUserContext.costCenter,
+  ]);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isSending, setIsSending] = useState<boolean>(false);
@@ -53,7 +66,7 @@ export const App: React.FC = () => {
   useEffect(() => {
     chatApi
       .getMyContext()
-      .then((ctx) => setUserContext(ctx))
+      .then((ctx) => setRawUserContext(ctx))
       .catch((err) =>
         console.log('Using default client user context:', err.message)
       );
@@ -114,7 +127,7 @@ export const App: React.FC = () => {
         setMessages((prev) => [...prev, aiMsg]);
       }
 
-      // Re-fetch backend state snapshot to rehydrate all components (Step 3a mechanism)
+      // Re-fetch backend state snapshot to rehydrate all components
       await refreshState();
     } catch (err: any) {
       console.error('Failed to send message:', err);
@@ -147,7 +160,7 @@ export const App: React.FC = () => {
 
       {/* 2. Main Container with Progress Stepper */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col gap-4">
-        {/* Progress Stepper (Bind to backend requestState.progress) */}
+        {/* Progress Stepper (Bind to backend requestState.progress, with explicit loading/error states) */}
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between px-1">
             <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
@@ -165,15 +178,20 @@ export const App: React.FC = () => {
               <span>{isStateLoading ? 'Syncing...' : 'Sync State'}</span>
             </button>
           </div>
-          <RequestProgressStepper progress={requestState?.progress} />
+          <RequestProgressStepper
+            progress={requestState?.progress}
+            isLoading={isStateLoading}
+            error={stateError}
+            onRetry={refreshState}
+          />
         </div>
 
         {/* Global Error Banner */}
-        {(errorMessage || stateError) && (
+        {errorMessage && (
           <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center justify-between animate-fade-in">
             <div className="flex items-center gap-2">
               <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
-              <span>{errorMessage || stateError}</span>
+              <span>{errorMessage}</span>
             </div>
             <button
               onClick={() => setErrorMessage(null)}
@@ -237,7 +255,13 @@ export const App: React.FC = () => {
                 </div>
                 <div className="flex items-center gap-1.5 text-xs text-slate-400 bg-slate-800/60 px-2.5 py-1 rounded-lg border border-slate-700/50">
                   <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-                  <span>State Hydrated</span>
+                  <span>
+                    {isStateLoading
+                      ? 'Syncing State...'
+                      : requestState
+                      ? 'State Hydrated'
+                      : 'Connecting...'}
+                  </span>
                 </div>
               </div>
 
