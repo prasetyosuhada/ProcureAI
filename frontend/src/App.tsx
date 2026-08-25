@@ -6,6 +6,7 @@ import { ChatInput } from './components/ChatInput';
 import { UserContext, ChatMessage } from './types/chat';
 import { useRequestState } from './hooks/useRequestState';
 import { chatApi } from './api/chatApi';
+import { requestsApi } from './api/requestsApi';
 import {
   FileText,
   Boxes,
@@ -30,21 +31,25 @@ export const App: React.FC = () => {
     costCenter: 'CC-ENG-001',
   });
 
-  // Stabilize userContext reference across renders to prevent infinite fetch loops
-  const userContext = useMemo<UserContext>(() => ({
-    userId: rawUserContext.userId,
-    userName: rawUserContext.userName,
-    departmentId: rawUserContext.departmentId,
-    costCenter: rawUserContext.costCenter,
-  }), [
-    rawUserContext.userId,
-    rawUserContext.userName,
-    rawUserContext.departmentId,
-    rawUserContext.costCenter,
-  ]);
+  // Stabilize userContext reference across renders
+  const userContext = useMemo<UserContext>(
+    () => ({
+      userId: rawUserContext.userId,
+      userName: rawUserContext.userName,
+      departmentId: rawUserContext.departmentId,
+      costCenter: rawUserContext.costCenter,
+    }),
+    [
+      rawUserContext.userId,
+      rawUserContext.userName,
+      rawUserContext.departmentId,
+      rawUserContext.costCenter,
+    ]
+  );
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isSending, setIsSending] = useState<boolean>(false);
+  const [isConfirming, setIsConfirming] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Phase 1 State Hydration Hook
@@ -139,14 +144,59 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleConfirmSpecifications = async () => {
+    setErrorMessage(null);
+    setIsConfirming(true);
+
+    try {
+      const result = await requestsApi.confirmSpecifications(
+        threadId,
+        userContext
+      );
+
+      if (result.message) {
+        const aiMsg: ChatMessage = {
+          id: `msg_${Date.now()}_confirm_res`,
+          role: 'assistant',
+          content: result.message,
+          timestamp: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, aiMsg]);
+      }
+
+      // Rehydrate full state
+      await refreshState();
+    } catch (err: any) {
+      console.error('Failed to confirm specifications:', err);
+      const errMsg =
+        err.response?.data?.detail ||
+        err.message ||
+        'Failed to confirm specifications';
+      setErrorMessage(errMsg);
+    } finally {
+      setIsConfirming(false);
+    }
+  };
+
+  // Safe optional chaining across entire chain
   const currentPhase =
     requestState?.next_agent === 'Demand'
       ? 'Demand'
-      : requestState?.progress.ready_for_submission === 'complete'
+      : requestState?.progress?.ready_for_submission === 'complete'
       ? 'Completed'
-      : requestState?.progress.clarification === 'complete'
+      : requestState?.progress?.clarification === 'complete'
       ? 'GeneratePR'
       : 'Clarification';
+
+  // Condition to display [Confirm Specifications] action prompt
+  const showConfirmPrompt = Boolean(
+    requestState?.progress?.clarification !== 'complete' &&
+      requestState?.pr?.item_name &&
+      requestState?.pr?.quantity &&
+      requestState?.pr?.quantity > 0 &&
+      requestState?.pr?.purpose &&
+      requestState?.pr?.required_date
+  );
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
@@ -160,7 +210,7 @@ export const App: React.FC = () => {
 
       {/* 2. Main Container with Progress Stepper */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col gap-4">
-        {/* Progress Stepper (Bind to backend requestState.progress, with explicit loading/error states) */}
+        {/* Progress Stepper */}
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between px-1">
             <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
@@ -173,7 +223,9 @@ export const App: React.FC = () => {
               title="Sync latest state snapshot from backend"
             >
               <RefreshCw
-                className={`w-3.5 h-3.5 ${isStateLoading ? 'animate-spin' : ''}`}
+                className={`w-3.5 h-3.5 ${
+                  isStateLoading ? 'animate-spin' : ''
+                }`}
               />
               <span>{isStateLoading ? 'Syncing...' : 'Sync State'}</span>
             </button>
@@ -223,13 +275,23 @@ export const App: React.FC = () => {
               <ChatWindow
                 messages={messages}
                 isLoading={isSending}
+                isConfirming={isConfirming}
+                prArtifact={requestState?.pr}
+                showConfirmPrompt={showConfirmPrompt}
+                onConfirmSpecifications={handleConfirmSpecifications}
+                activeAgentLabel={
+                  requestState?.next_agent === 'Demand'
+                    ? 'ProcureAI is analyzing warehouse inventory & assets...'
+                    : 'ProcureAI is clarifying requirements...'
+                }
               />
 
               {/* Chat Input */}
               <div className="pt-2">
                 <ChatInput
                   onSendMessage={(text) => handleSendMessage(text)}
-                  isLoading={isSending}
+                  isLoading={isSending || isConfirming}
+                  hasMessages={messages.length > 0}
                 />
               </div>
             </div>
@@ -265,7 +327,7 @@ export const App: React.FC = () => {
                 </div>
               </div>
 
-              {/* Step 3a: Hydrated State Diagnostics Card */}
+              {/* State Diagnostics Telemetry */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800/80 flex flex-col gap-1">
                   <span className="text-[11px] text-slate-500 font-medium">
@@ -308,10 +370,10 @@ export const App: React.FC = () => {
                 </div>
                 <div className="flex flex-col gap-1">
                   <h4 className="text-sm font-semibold text-slate-300">
-                    Artifact Panel Shell (Step 3a Ready)
+                    Artifact Panel Workspace (Step 3c Ready)
                   </h4>
                   <p className="text-xs text-slate-400 max-w-sm">
-                    In Step 3c & 3d, this panel will render the interactive{' '}
+                    In Step 3c & 3d, this panel will host the live interactive{' '}
                     <code className="text-indigo-300 font-mono text-[11px]">
                       PRArtifactCard
                     </code>
