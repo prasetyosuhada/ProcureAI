@@ -241,8 +241,7 @@ def _build_clarification_attention_items(
     if ram_val:
         try:
             policy_result = get_procurement_policy.invoke({
-                "category_id": "IT-LAPTOP",
-                "cost_center": user_context.get("cost_center", "CC-ENG-001")
+                "item_name": draft.get("item", "General Item")
             })
             max_ram = policy_result.get("max_specs", {}).get("ram", "")
             if max_ram and ram_val and int(''.join(filter(str.isdigit, str(ram_val)))) > int(''.join(filter(str.isdigit, str(max_ram)))):

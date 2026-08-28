@@ -1,7 +1,10 @@
 import pytest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from httpx import AsyncClient, ASGITransport
 from main import app
+from app.api.v1.requests import handle_recommendation_action
+from app.schemas.requests import RecommendationActionRequest
+from app.schemas.user_context import UserContext
 
 @pytest.fixture(autouse=True)
 def mock_demand_tools():
@@ -50,6 +53,21 @@ def mock_demand_tools():
             "last_purchase_price": 1200.0,
             "preferred_vendor": "Dell Enterprise Direct"
         }
+        yield
+
+
+@pytest.fixture(autouse=True)
+def mock_clarification_tools():
+    """Keep request API tests independent of the optional PostgreSQL service."""
+    with patch("app.agent.nodes.clarification_node.get_categories") as mock_categories, \
+         patch("app.agent.nodes.clarification_node.get_specifications") as mock_specs, \
+         patch("app.agent.nodes.clarification_node.get_procurement_policy") as mock_policy:
+        mock_categories.invoke.return_value = [{
+            "category_id": "IT-HW-01",
+            "category_name": "IT Equipment > Laptops",
+        }]
+        mock_specs.invoke.return_value = {"standard_models": []}
+        mock_policy.invoke.return_value = {"policy_text": "Standard policy", "approval_rules": {}}
         yield
 
 
@@ -168,6 +186,47 @@ async def test_recommendation_action_modify():
 
 
 @pytest.mark.asyncio
+async def test_recommendation_accept_promotes_net_new_purchase_to_final_pr_quantity():
+    """Accept is the explicit point where the recommended quantity becomes final PR quantity."""
+
+    class Snapshot:
+        def __init__(self, values):
+            self.values = values
+
+    class FakeGraph:
+        def __init__(self):
+            self.values = {
+                "pr": {"item_name": "Laptop", "quantity": 10, "status": "draft"},
+                "demand": {"requested_qty": 10, "net_new_purchase": 2},
+                "progress": {"validation": "in_progress"},
+                "recommendation_status": "pending_review",
+                "messages": [],
+            }
+
+        async def aget_state(self, _config):
+            return Snapshot(self.values)
+
+        async def aupdate_state(self, _config, patch):
+            self.values = {
+                **self.values,
+                **patch,
+                "pr": {**self.values.get("pr", {}), **patch.get("pr", {})},
+                "progress": {**self.values.get("progress", {}), **patch.get("progress", {})},
+            }
+
+    graph = FakeGraph()
+    with patch("app.api.v1.requests.get_compiled_procure_graph", new=AsyncMock(return_value=graph)):
+        result = await handle_recommendation_action(
+            "thread_accept_unit",
+            RecommendationActionRequest(action="accept"),
+            UserContext(user_id="usr_101"),
+        )
+
+    assert result.pr["quantity"] == 2
+    assert graph.values["pr"]["quantity"] == 2
+
+
+@pytest.mark.asyncio
 async def test_recommendation_action_accept_and_reject():
     """Verify recommendation accept and reject actions."""
     transport = ASGITransport(app=app)
@@ -187,6 +246,7 @@ async def test_recommendation_action_accept_and_reject():
         assert acc_res.status_code == 200
         assert acc_res.json()["recommendation_status"] == "accepted"
         assert acc_res.json()["progress"]["validation"] == "complete"
+        assert acc_res.json()["pr"]["quantity"] == 2
 
         # Reject
         thread_reject = "thread_rec_reject_06"
@@ -265,6 +325,7 @@ async def test_submit_pr_with_guards():
         assert data["pr_number"].startswith("PR-")
         assert data["progress"]["ready_for_submission"] == "complete"
         assert data["pr"]["status"] == "submitted"
+        assert data["pr"]["quantity"] == 2
 
 
 # ==============================================================================

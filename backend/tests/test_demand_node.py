@@ -4,6 +4,33 @@ from langchain_core.messages import HumanMessage
 from app.agent.state import create_initial_graph_state
 from app.agent.nodes.demand_node import demand_analysis_node
 
+
+@pytest.fixture(autouse=True)
+def mock_demand_tools():
+    """Keep demand node tests deterministic and independent of PostgreSQL."""
+    with patch("app.agent.nodes.demand_node.get_inventory") as mock_inv, \
+         patch("app.agent.nodes.demand_node.get_assets") as mock_assets, \
+         patch("app.agent.nodes.demand_node.get_open_prs_and_pos") as mock_pipeline, \
+         patch("app.agent.nodes.demand_node.get_budget_status") as mock_budget, \
+         patch("app.agent.nodes.demand_node.get_purchase_history") as mock_history:
+        mock_inv.invoke.side_effect = lambda params: {
+            "item": params["item_name"],
+            "available_quantity": 3 if params["item_name"] == "Laptop" else 0,
+        }
+        mock_assets.invoke.side_effect = lambda params: {
+            "item": params["item_name"],
+            "total_available_soon": 5 if params["item_name"] == "Laptop" else 0,
+        }
+        mock_pipeline.invoke.return_value = {"total_in_pipeline": 0}
+        mock_budget.invoke.return_value = {
+            "remaining_budget": 30_000,
+            "currency": "USD",
+            "approval_threshold": 100_000,
+        }
+        mock_history.invoke.return_value = {"average_unit_cost": 1_200}
+        yield
+
+
 @pytest.mark.asyncio
 async def test_demand_node_partial_stock_deduction():
     """Test demand_node when existing stock partially covers requested quantity."""
@@ -26,6 +53,32 @@ async def test_demand_node_partial_stock_deduction():
     assert demand["available_assets"] == 5
     assert demand["recommended_quantity"] == 2  # 10 - (3 + 5) = 2
     assert "recommended new purchase quantity is 2" in demand["justification"]
+
+
+@pytest.mark.asyncio
+async def test_demand_node_does_not_overwrite_pr_quantity():
+    """Demand analysis keeps requested PR quantity unchanged until user review."""
+    state = create_initial_graph_state({
+        "user_id": "usr_101",
+        "cost_center": "CC-ENG-001",
+        "department_id": "DEPT-ENG",
+    })
+    state["requirement_draft"] = {
+        "item": "Laptop",
+        "category": "IT Equipment > Laptops",
+        "quantity": 10,
+        "purpose": "Backend Team",
+        "required_date": "2026-09-01",
+        "is_complete": True,
+    }
+    state["pr"]["quantity"] = 10
+
+    result = await demand_analysis_node(state)
+
+    assert result["demand"]["requested_qty"] == 10
+    assert result["demand"]["net_new_purchase"] == 2
+    assert "pr" not in result
+    assert state["pr"]["quantity"] == 10
 
 
 @pytest.mark.asyncio

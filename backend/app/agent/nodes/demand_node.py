@@ -186,6 +186,10 @@ async def demand_analysis_node(state: GraphState) -> Dict[str, Any]:
 
     Legacy backward compatibility:
     - Still writes to `demand_analysis` (DEPRECATED: do not rely in new code).
+
+    PR quantity contract:
+    - Leaves `pr.quantity` unchanged. The requested quantity remains visible on
+      the PR artifact until the user explicitly accepts or modifies the recommendation.
     """
     requirement_draft = state.get("requirement_draft", {})
     user_context = state.get("user_context", {})
@@ -401,8 +405,6 @@ async def demand_analysis_node(state: GraphState) -> Dict[str, Any]:
         "progress": progress_update,
         "agent_activity": agent_activity,
         "attention_items": new_attention_items,
-        # Also update PR quantity with recommended_qty
-        "pr": {"quantity": recommended_qty},
         # DEPRECATED legacy fields — kept for backward compatibility with existing tests
         "demand_analysis": demand_analysis_payload,
         "next_agent": "GeneratePR",

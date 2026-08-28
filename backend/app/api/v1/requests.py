@@ -151,7 +151,7 @@ async def handle_recommendation_action(
     """
     Decision endpoint for AI Demand Recommendation (Option A - Pure State Mutation).
     Handles:
-    - 'accept': Validates recommendation and marks validation complete.
+    - 'accept': Promotes the recommended net-new quantity to the final PR quantity and marks validation complete.
     - 'modify': Directly patches net_new_purchase quantity with is_manually_overridden=True and notes.
     - 'reject': Marks recommendation rejected and pauses/cancels requisition.
 
@@ -230,8 +230,12 @@ async def handle_recommendation_action(
             await graph.aupdate_state(config, patch)
 
         elif payload.action == "accept":
+            # Accepting the recommendation is the explicit user decision that
+            # turns the net-new purchase quantity into the final PR quantity.
+            current_pr["quantity"] = current_demand["net_new_purchase"]
             patch = {
                 "recommendation_status": "accepted",
+                "pr": current_pr,
                 "progress": {
                     "validation": "complete",
                     "ready_for_submission": "in_progress"

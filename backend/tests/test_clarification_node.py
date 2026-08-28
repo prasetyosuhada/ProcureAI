@@ -1,4 +1,5 @@
 import pytest
+from unittest.mock import patch
 from langchain_core.messages import HumanMessage
 from app.agent.state import create_initial_graph_state
 from app.agent.nodes.clarification_node import requirement_clarification_node, extract_requirement_heuristics
@@ -50,6 +51,33 @@ async def test_clarification_node_complete():
     assert result["requirement_draft"]["quantity"] == 10
     assert result["pr"]["is_ready_for_confirmation"] is True
     assert "confirm" in result["messages"][0].content.lower() or "summary" in result["messages"][0].content.lower() or "demand" in result["messages"][0].content.lower()
+
+
+@pytest.mark.asyncio
+async def test_clarification_node_ram_policy_uses_tool_contract():
+    """RAM policy validation passes item_name expected by get_procurement_policy."""
+    state = create_initial_graph_state({"user_id": "usr_1", "department_id": "DEPT-ENG"})
+    state["messages"] = [
+        HumanMessage(content="I need 10 laptops for backend development before September 1 with 32GB RAM")
+    ]
+
+    with patch("app.agent.nodes.clarification_node.settings.GEMINI_API_KEY", ""), \
+         patch("app.agent.nodes.clarification_node.get_categories") as mock_categories, \
+         patch("app.agent.nodes.clarification_node.get_procurement_policy") as mock_policy:
+        mock_categories.invoke.return_value = [{
+            "category_id": "IT-HW-01",
+            "category_name": "IT Equipment > Laptops",
+        }]
+        mock_policy.invoke.return_value = {
+            "policy_text": "Standard policy",
+            "requires_it_approval": True,
+            "requires_facilities_approval": False,
+        }
+
+        result = await requirement_clarification_node(state)
+
+    mock_policy.invoke.assert_called_once_with({"item_name": "Laptop"})
+    assert result["requirement_draft"]["quantity"] == 10
 
 @pytest.mark.asyncio
 async def test_clarification_node_no_keyword_false_positive():

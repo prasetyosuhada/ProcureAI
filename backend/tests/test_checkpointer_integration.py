@@ -39,6 +39,7 @@ async def test_checkpointer_preserves_conversation_history():
 
     assert r3["demand_analysis"]["is_complete"] is True
     assert r3["demand_analysis"]["recommended_quantity"] == 2
+    assert r3["pr"]["quantity"] == 10
     assert len(r3["messages"]) >= 6  # Preserved cumulative history across turns
 
 @pytest.mark.asyncio
