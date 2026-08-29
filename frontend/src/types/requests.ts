@@ -1,6 +1,6 @@
 export type StageStatus = 'pending' | 'in_progress' | 'complete' | 'blocked';
 
-export type RecommendationStatus = 'none' | 'pending_review' | 'accepted' | 'modified' | 'rejected';
+export type RecommendationStatus = 'none' | 'pending_review' | 'accepted' | 'modified' | 'kept_original' | 'rejected';
 
 export interface RequestProgress {
   clarification: StageStatus;
@@ -77,6 +77,6 @@ export interface RecommendationModificationPayload {
 }
 
 export interface RecommendationActionPayload {
-  action: 'accept' | 'modify' | 'reject';
+  action: 'accept' | 'keep_original' | 'modify' | 'reject';
   modification?: RecommendationModificationPayload;
 }

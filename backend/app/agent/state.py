@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, ConfigDict
 # 1. Stage & Progress Types
 # ==============================================================================
 StageStatus = Literal["pending", "in_progress", "complete", "blocked"]
-RecommendationStatus = Literal["none", "pending_review", "accepted", "modified", "rejected"]
+RecommendationStatus = Literal["none", "pending_review", "accepted", "modified", "kept_original", "rejected"]
 
 class RequestProgress(BaseModel):
     clarification: StageStatus = Field(default="pending", description="Status tahap klarifikasi kebutuhan")

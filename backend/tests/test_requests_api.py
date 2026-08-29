@@ -6,71 +6,6 @@ from app.api.v1.requests import handle_recommendation_action
 from app.schemas.requests import RecommendationActionRequest
 from app.schemas.user_context import UserContext
 
-@pytest.fixture(autouse=True)
-def mock_demand_tools():
-    """
-    Deterministic mock for external tools in demand analysis node.
-    Ensures unit/integration tests are completely isolated from Postgres / external services.
-    Stock (3) + Assets (5) = 8 available units.
-    """
-    with patch("app.agent.nodes.demand_node.get_inventory") as mock_inv, \
-         patch("app.agent.nodes.demand_node.get_assets") as mock_assets, \
-         patch("app.agent.nodes.demand_node.get_open_prs_and_pos") as mock_pipe, \
-         patch("app.agent.nodes.demand_node.get_budget_status") as mock_budget, \
-         patch("app.agent.nodes.demand_node.get_purchase_history") as mock_hist:
-        
-        mock_inv.invoke.return_value = {
-            "item": "Laptop",
-            "available_quantity": 3,
-            "location": "Warehouse A-12",
-            "condition": "New"
-        }
-        mock_assets.invoke.return_value = {
-            "item": "Laptop",
-            "currently_unused": 3,
-            "scheduled_returns_next_30_days": 2,
-            "total_available_soon": 5,
-            "notes": "Returning from contractor offboarding"
-        }
-        mock_pipe.invoke.return_value = {
-            "item": "Laptop",
-            "open_prs_count": 0,
-            "open_pos_count": 0,
-            "pipeline_quantity": 0,
-            "details": []
-        }
-        mock_budget.invoke.return_value = {
-            "cost_center": "CC-ENG-001",
-            "allocated_budget": 50000.0,
-            "committed_spend": 12000.0,
-            "actual_spend": 8000.0,
-            "remaining_budget": 30000.0,
-            "status": "healthy"
-        }
-        mock_hist.invoke.return_value = {
-            "item": "Laptop",
-            "average_unit_price": 1200.0,
-            "last_purchase_price": 1200.0,
-            "preferred_vendor": "Dell Enterprise Direct"
-        }
-        yield
-
-
-@pytest.fixture(autouse=True)
-def mock_clarification_tools():
-    """Keep request API tests independent of the optional PostgreSQL service."""
-    with patch("app.agent.nodes.clarification_node.get_categories") as mock_categories, \
-         patch("app.agent.nodes.clarification_node.get_specifications") as mock_specs, \
-         patch("app.agent.nodes.clarification_node.get_procurement_policy") as mock_policy:
-        mock_categories.invoke.return_value = [{
-            "category_id": "IT-HW-01",
-            "category_name": "IT Equipment > Laptops",
-        }]
-        mock_specs.invoke.return_value = {"standard_models": []}
-        mock_policy.invoke.return_value = {"policy_text": "Standard policy", "approval_rules": {}}
-        yield
-
-
 @pytest.mark.asyncio
 async def test_get_request_state_new_and_populated():
     """Verify GET /api/v1/requests/{id}/state for both initial/empty and populated threads."""
@@ -224,6 +159,96 @@ async def test_recommendation_accept_promotes_net_new_purchase_to_final_pr_quant
 
     assert result.pr["quantity"] == 2
     assert graph.values["pr"]["quantity"] == 2
+
+
+@pytest.mark.asyncio
+async def test_recommendation_reject_restores_requested_quantity_and_blocks_pr():
+    """Reject cancels the recommendation and leaves the PR at the original request quantity."""
+
+    class Snapshot:
+        def __init__(self, values):
+            self.values = values
+
+    class FakeGraph:
+        def __init__(self):
+            self.values = {
+                "pr": {"item_name": "Laptop", "quantity": 8, "status": "draft"},
+                "demand": {"requested_qty": 10, "net_new_purchase": 8},
+                "progress": {"validation": "in_progress", "ready_for_submission": "pending"},
+                "recommendation_status": "pending_review",
+                "messages": [],
+            }
+
+        async def aget_state(self, _config):
+            return Snapshot(self.values)
+
+        async def aupdate_state(self, _config, patch):
+            self.values = {
+                **self.values,
+                **patch,
+                "pr": {**self.values.get("pr", {}), **patch.get("pr", {})},
+                "progress": {**self.values.get("progress", {}), **patch.get("progress", {})},
+            }
+
+    graph = FakeGraph()
+    with patch("app.api.v1.requests.get_compiled_procure_graph", new=AsyncMock(return_value=graph)):
+        result = await handle_recommendation_action(
+            "thread_reject_unit",
+            RecommendationActionRequest(action="reject"),
+            UserContext(user_id="usr_101"),
+        )
+
+    assert result.pr["quantity"] == 10
+    assert result.pr["status"] == "rejected"
+    assert result.recommendation_status == "rejected"
+    assert result.progress["validation"] == "blocked"
+    assert result.progress["ready_for_submission"] == "blocked"
+
+
+@pytest.mark.asyncio
+async def test_recommendation_keep_original_is_explicit_and_submit_ready():
+    """Keep Original retains requested quantity and records a distinct status."""
+
+    class Snapshot:
+        def __init__(self, values):
+            self.values = values
+
+    class FakeGraph:
+        def __init__(self):
+            self.values = {
+                "pr": {"item_name": "Laptop", "quantity": 2, "status": "draft"},
+                "demand": {"requested_qty": 10, "net_new_purchase": 2},
+                "progress": {"validation": "in_progress", "ready_for_submission": "pending"},
+                "recommendation_status": "pending_review",
+                "messages": [],
+            }
+
+        async def aget_state(self, _config):
+            return Snapshot(self.values)
+
+        async def aupdate_state(self, _config, patch):
+            self.values = {
+                **self.values,
+                **patch,
+                "pr": {**self.values.get("pr", {}), **patch.get("pr", {})},
+                "demand": {**self.values.get("demand", {}), **patch.get("demand", {})},
+                "progress": {**self.values.get("progress", {}), **patch.get("progress", {})},
+            }
+
+    graph = FakeGraph()
+    with patch("app.api.v1.requests.get_compiled_procure_graph", new=AsyncMock(return_value=graph)):
+        result = await handle_recommendation_action(
+            "thread_keep_original_unit",
+            RecommendationActionRequest(action="keep_original"),
+            UserContext(user_id="usr_101"),
+        )
+
+    assert result.pr["quantity"] == 10
+    assert result.demand["net_new_purchase"] == 10
+    assert result.demand["override_reason"] == "User chose to keep original requested quantity"
+    assert result.recommendation_status == "kept_original"
+    assert result.progress["validation"] == "complete"
+    assert result.progress["ready_for_submission"] == "in_progress"
 
 
 @pytest.mark.asyncio

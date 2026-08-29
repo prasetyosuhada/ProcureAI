@@ -152,6 +152,7 @@ async def handle_recommendation_action(
     Decision endpoint for AI Demand Recommendation (Option A - Pure State Mutation).
     Handles:
     - 'accept': Promotes the recommended net-new quantity to the final PR quantity and marks validation complete.
+    - 'keep_original': Explicitly retains the requested quantity as the final PR quantity.
     - 'modify': Directly patches net_new_purchase quantity with is_manually_overridden=True and notes.
     - 'reject': Marks recommendation rejected and pauses/cancels requisition.
 
@@ -229,6 +230,31 @@ async def handle_recommendation_action(
             }
             await graph.aupdate_state(config, patch)
 
+        elif payload.action == "keep_original":
+            original_qty = current_demand["requested_qty"]
+            override_reason = "User chose to keep original requested quantity"
+            updated_demand["net_new_purchase"] = original_qty
+            updated_demand["is_manually_overridden"] = True
+            updated_demand["override_reason"] = override_reason
+            current_pr["quantity"] = original_qty
+
+            patch = {
+                "demand": updated_demand,
+                "pr": current_pr,
+                "recommendation_status": "kept_original",
+                "progress": {
+                    "validation": "complete",
+                    "ready_for_submission": "in_progress"
+                },
+                "messages": [
+                    AIMessage(
+                        content=f"✅ Original requested quantity retained at **{original_qty} units**. "
+                                "Ready for final review."
+                    )
+                ]
+            }
+            await graph.aupdate_state(config, patch)
+
         elif payload.action == "accept":
             # Accepting the recommendation is the explicit user decision that
             # turns the net-new purchase quantity into the final PR quantity.
@@ -247,13 +273,17 @@ async def handle_recommendation_action(
             await graph.aupdate_state(config, patch)
 
         elif payload.action == "reject":
+            # Rejection cancels the recommendation and restores the original
+            # requested quantity; the rejected status prevents submission.
+            current_pr["quantity"] = current_demand["requested_qty"]
+            current_pr["status"] = "rejected"
             patch = {
                 "recommendation_status": "rejected",
                 "progress": {
                     "validation": "blocked",
                     "ready_for_submission": "blocked"
                 },
-                "pr": {"status": "rejected"},
+                "pr": current_pr,
                 "messages": [
                     AIMessage(content="🛑 Demand recommendation was rejected by user. The procurement request has been paused.")
                 ]
@@ -373,7 +403,7 @@ async def submit_purchase_requisition(
     Final PR Submission endpoint with backend guards:
     - Guard 1: Rejects submission if there are unresolved blocking attention items.
     - Guard 2: Validates presence of item name and positive quantity.
-    - Guard 3: Validates recommendation_status is 'accepted' or 'modified' (rejects 'none', 'pending_review', 'rejected').
+    - Guard 3: Validates recommendation_status is 'accepted', 'kept_original', or 'modified' (rejects 'none', 'pending_review', 'rejected').
     - Guard 4: Rejects submission if PR is already submitted.
     """
     try:
@@ -418,7 +448,7 @@ async def submit_purchase_requisition(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cannot submit PR: Demand recommendation was rejected. Please revise requirements and obtain an accepted or modified recommendation before submitting."
             )
-        elif rec_status not in ["accepted", "modified"]:
+        elif rec_status not in ["accepted", "modified", "kept_original"]:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Cannot submit PR: Recommendation status is '{rec_status}'. You must review and accept or modify the recommendation before submitting."

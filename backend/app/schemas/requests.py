@@ -18,9 +18,9 @@ class RecommendationModificationSchema(BaseModel):
 
 
 class RecommendationActionRequest(BaseModel):
-    action: Literal["accept", "modify", "reject"] = Field(
+    action: Literal["accept", "keep_original", "modify", "reject"] = Field(
         ..., 
-        description="Decision on AI demand recommendation: 'accept', 'modify', or 'reject'"
+        description="Decision on AI demand recommendation: 'accept', 'keep_original', 'modify', or 'reject'"
     )
     modification: Optional[RecommendationModificationSchema] = Field(
         default=None,
