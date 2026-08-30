@@ -35,6 +35,17 @@ def route_demand(state: GraphState) -> str:
         return END
     return END
 
+
+async def _route_clarification_async(state: GraphState) -> str:
+    """Async adapter so LangGraph does not dispatch the route through its thread executor."""
+    return route_clarification(state)
+
+
+async def _route_demand_async(state: GraphState) -> str:
+    """Async adapter so LangGraph does not dispatch the route through its thread executor."""
+    return route_demand(state)
+
+
 def build_procure_graph(checkpointer: Optional[BaseCheckpointSaver] = None):
     """
     Assembles the StateGraph with Clarification and Demand nodes and compiles with a checkpointer.
@@ -49,7 +60,7 @@ def build_procure_graph(checkpointer: Optional[BaseCheckpointSaver] = None):
     builder.add_edge(START, "clarification")
     builder.add_conditional_edges(
         "clarification",
-        route_clarification,
+        _route_clarification_async,
         {
             "demand": "demand",
             END: END
@@ -57,7 +68,7 @@ def build_procure_graph(checkpointer: Optional[BaseCheckpointSaver] = None):
     )
     builder.add_conditional_edges(
         "demand",
-        route_demand,
+        _route_demand_async,
         {
             END: END
         }

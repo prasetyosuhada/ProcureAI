@@ -1,16 +1,40 @@
 import pytest
-import asyncio
+from unittest.mock import AsyncMock, patch
+
 from app.db.redis import check_redis_connection, get_redis_client
 
-@pytest.mark.asyncio
-async def test_redis_ping():
-    """Verify that Redis instance is reachable."""
-    is_connected = await check_redis_connection()
-    assert is_connected is True, "Failed to ping Redis instance"
+
+@pytest.fixture
+def redis_client_mock():
+    """Stateful async Redis double for deterministic unit tests."""
+    values = {}
+    client = AsyncMock()
+    client.ping.return_value = True
+
+    async def set_value(key, value, ex=None):
+        values[key] = value
+
+    async def get_value(key):
+        return values.get(key)
+
+    client.set.side_effect = set_value
+    client.get.side_effect = get_value
+
+    with patch("app.db.redis.aioredis.from_url", return_value=client):
+        yield client
+
 
 @pytest.mark.asyncio
-async def test_redis_set_get():
-    """Verify basic key-value operations on Redis."""
+async def test_redis_ping(redis_client_mock):
+    """Verify the Redis connection helper handles a successful async ping."""
+    is_connected = await check_redis_connection()
+    assert is_connected is True, "Failed to ping Redis instance"
+    redis_client_mock.ping.assert_awaited_once()
+    redis_client_mock.aclose.assert_awaited_once()
+
+@pytest.mark.asyncio
+async def test_redis_set_get(redis_client_mock):
+    """Verify callers can use the async Redis client contract."""
     client = await get_redis_client()
     test_key = "test:procureai:ping"
     test_val = "hello_redis"
@@ -20,8 +44,3 @@ async def test_redis_set_get():
     await client.aclose()
     
     assert result == test_val, f"Expected {test_val}, got {result}"
-
-if __name__ == "__main__":
-    asyncio.run(test_redis_ping())
-    asyncio.run(test_redis_set_get())
-    print("Redis verification tests passed successfully!")
