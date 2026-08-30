@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { isAxiosError } from 'axios';
 import { Navbar } from './components/Navbar';
 import { RequestProgressStepper } from './components/RequestProgressStepper';
 import { ChatWindow } from './components/ChatWindow';
@@ -6,11 +7,26 @@ import { ChatInput } from './components/ChatInput';
 import { PRArtifactCard } from './components/PRArtifactCard';
 import { DemandAnalysisPanel } from './components/DemandAnalysisPanel';
 import { AgentActivityStrip } from './components/AgentActivityStrip';
+import { RecommendationCard } from './components/RecommendationCard';
+import { AttentionBanner } from './components/AttentionBanner';
+import { SubmissionBar } from './components/SubmissionBar';
 import { UserContext, ChatMessage } from './types/chat';
+import { RecommendationActionPayload } from './types/requests';
 import { useRequestState } from './hooks/useRequestState';
 import { chatApi } from './api/chatApi';
-import { requestsApi } from './api/requestsApi';
+import { requestsApi, SubmitPRResponse } from './api/requestsApi';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
+
+interface ApiErrorResponse {
+  detail?: string;
+}
+
+function getApiErrorMessage(error: unknown, fallback: string): string {
+  if (isAxiosError<ApiErrorResponse>(error)) {
+    return error.response?.data?.detail || error.message || fallback;
+  }
+  return error instanceof Error ? error.message : fallback;
+}
 
 export const App: React.FC = () => {
   const [threadId, setThreadId] = useState<string>(() => {
@@ -47,6 +63,16 @@ export const App: React.FC = () => {
   const [isSending, setIsSending] = useState<boolean>(false);
   const [isConfirming, setIsConfirming] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [processingRecommendation, setProcessingRecommendation] = useState<
+    RecommendationActionPayload['action'] | null
+  >(null);
+  const [resolvingAttentionId, setResolvingAttentionId] = useState<
+    string | null
+  >(null);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [submissionError, setSubmissionError] = useState<string | null>(null);
+  const [submissionResult, setSubmissionResult] =
+    useState<SubmitPRResponse | null>(null);
 
   // Phase 1 State Hydration Hook
   const {
@@ -91,11 +117,15 @@ export const App: React.FC = () => {
     setThreadId(newThread);
     setMessages([]);
     setErrorMessage(null);
+    setProcessingRecommendation(null);
+    setResolvingAttentionId(null);
+    setSubmissionError(null);
+    setSubmissionResult(null);
   };
 
   const handleSendMessage = async (
     content: string,
-    requirementOverride?: Record<string, any>
+    requirementOverride?: Record<string, unknown>
   ) => {
     setErrorMessage(null);
     const userMsg: ChatMessage = {
@@ -130,11 +160,9 @@ export const App: React.FC = () => {
 
       // Re-fetch backend state snapshot to rehydrate all components
       await refreshState();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to send message:', err);
-      const errMsg =
-        err.response?.data?.detail || err.message || 'Failed to send message';
-      setErrorMessage(errMsg);
+      setErrorMessage(getApiErrorMessage(err, 'Failed to send message'));
     } finally {
       setIsSending(false);
     }
@@ -162,15 +190,74 @@ export const App: React.FC = () => {
 
       // Rehydrate full state
       await refreshState();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to confirm specifications:', err);
-      const errMsg =
-        err.response?.data?.detail ||
-        err.message ||
-        'Failed to confirm specifications';
-      setErrorMessage(errMsg);
+      setErrorMessage(
+        getApiErrorMessage(err, 'Failed to confirm specifications')
+      );
     } finally {
       setIsConfirming(false);
+    }
+  };
+
+  const handleRecommendationAction = async (
+    payload: RecommendationActionPayload
+  ) => {
+    setErrorMessage(null);
+    setSubmissionError(null);
+    setProcessingRecommendation(payload.action);
+
+    try {
+      await requestsApi.handleRecommendation(threadId, payload, userContext);
+      await refreshState();
+      return true;
+    } catch (err: unknown) {
+      console.error('Failed to process recommendation:', err);
+      setErrorMessage(
+        getApiErrorMessage(err, 'Failed to process recommendation')
+      );
+      return false;
+    } finally {
+      setProcessingRecommendation(null);
+    }
+  };
+
+  const handleResolveAttention = async (itemId: string) => {
+    setErrorMessage(null);
+    setResolvingAttentionId(itemId);
+
+    try {
+      await requestsApi.resolveAttentionItem(threadId, itemId, userContext);
+      await refreshState();
+    } catch (err: unknown) {
+      console.error('Failed to resolve attention item:', err);
+      setErrorMessage(
+        getApiErrorMessage(err, 'Failed to resolve attention item')
+      );
+    } finally {
+      setResolvingAttentionId(null);
+    }
+  };
+
+  const handleSubmitPR = async () => {
+    setSubmissionError(null);
+    setIsSubmitting(true);
+
+    try {
+      const result = await requestsApi.submitPR(
+        threadId,
+        undefined,
+        userContext
+      );
+      setSubmissionResult(result);
+      await refreshState();
+    } catch (err: unknown) {
+      console.error('Failed to submit PR:', err);
+      setSubmissionError(
+        getApiErrorMessage(err, 'Failed to submit Purchase Requisition')
+      );
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -246,6 +333,12 @@ export const App: React.FC = () => {
           </div>
         )}
 
+        <AttentionBanner
+          items={requestState?.attention_items}
+          resolvingItemId={resolvingAttentionId}
+          onResolve={handleResolveAttention}
+        />
+
         {/* 3. Split-Pane Workstation Layout */}
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-[580px] pb-6">
           {/* Left Column: Conversation Pane (Col span: 6/12) */}
@@ -300,8 +393,34 @@ export const App: React.FC = () => {
               progress={requestState?.progress}
             />
 
-            {/* 3. Agent Activity & Execution Telemetry */}
+            {/* 3. Explicit Human Decision on AI Recommendation */}
+            <RecommendationCard
+              demand={requestState?.demand}
+              progress={requestState?.progress}
+              recommendationStatus={
+                requestState?.recommendation_status || 'none'
+              }
+              processingAction={processingRecommendation}
+              onAction={handleRecommendationAction}
+            />
+
+            {/* 4. Agent Activity & Execution Telemetry */}
             <AgentActivityStrip activities={requestState?.agent_activity} />
+
+            {/* 5. Final Submission Gate & Confirmation */}
+            {requestState?.progress?.demand_analysis === 'complete' && (
+              <SubmissionBar
+                pr={requestState?.pr}
+                attentionItems={requestState?.attention_items}
+                recommendationStatus={
+                  requestState?.recommendation_status || 'none'
+                }
+                isSubmitting={isSubmitting}
+                submitError={submissionError}
+                submitResult={submissionResult}
+                onSubmit={handleSubmitPR}
+              />
+            )}
           </div>
         </div>
       </main>

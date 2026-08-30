@@ -321,6 +321,7 @@ async def demand_analysis_node(state: GraphState) -> Dict[str, Any]:
         reserved_qty=pipeline_qty,
         net_new_purchase=recommended_qty,
         estimated_saving=estimated_saving,
+        justification=justification,
         is_manually_overridden=is_manually_overridden,
         override_reason=override_reason,
     )
@@ -393,7 +394,8 @@ async def demand_analysis_node(state: GraphState) -> Dict[str, Any]:
         f"💡 **Recommended Net Purchase Quantity:** **{recommended_qty} units**\n"
         f"{manually_overridden_note}\n"
         f"📝 **Justification:**\n{justification}\n\n"
-        f"Please review the Demand Analysis panel and choose to **Accept**, **Modify**, or **Reject** the recommendation."
+        f"Please review the Demand Analysis panel and choose to **Accept**, **Keep Original Quantity**, "
+        f"**Modify**, or **Reject** the recommendation."
     )
 
     ai_message = AIMessage(content=summary_message)
@@ -403,6 +405,7 @@ async def demand_analysis_node(state: GraphState) -> Dict[str, Any]:
         # Phase 1 fields (via Annotated reducers)
         "demand": demand_payload,
         "progress": progress_update,
+        "recommendation_status": "pending_review",
         "agent_activity": agent_activity,
         "attention_items": new_attention_items,
         # DEPRECATED legacy fields — kept for backward compatibility with existing tests

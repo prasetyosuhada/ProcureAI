@@ -51,6 +51,8 @@ async def test_demand_node_does_not_overwrite_pr_quantity():
 
     assert result["demand"]["requested_qty"] == 10
     assert result["demand"]["net_new_purchase"] == 2
+    assert "recommended new purchase quantity is 2" in result["demand"]["justification"]
+    assert result["recommendation_status"] == "pending_review"
     assert "pr" not in result
     assert state["pr"]["quantity"] == 10
 

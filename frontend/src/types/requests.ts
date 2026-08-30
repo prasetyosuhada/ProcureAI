@@ -36,6 +36,7 @@ export interface DemandBreakdown {
   reserved_qty: number;
   net_new_purchase: number;
   estimated_saving?: number | null;
+  justification?: string | null;
   is_manually_overridden: boolean;
   override_reason?: string | null;
 }

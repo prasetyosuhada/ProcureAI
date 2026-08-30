@@ -80,6 +80,7 @@ class DemandBreakdown(BaseModel):
     reserved_qty: int = Field(default=0, description="Kuantitas yang sudah di-reserve")
     net_new_purchase: int = Field(..., description="Jumlah rekomendasi pembelian baru")
     estimated_saving: Optional[float] = Field(default=None, description="Estimasi penghematan biaya dari stok/aset")
+    justification: Optional[str] = Field(default=None, description="Penjelasan AI untuk rekomendasi pembelian")
     is_manually_overridden: bool = Field(default=False, description="True jika net_new_purchase di-override manual oleh user")
     override_reason: Optional[str] = Field(default=None, description="Alasan manual adjustment dari user")
 

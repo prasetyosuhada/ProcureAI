@@ -1,8 +1,11 @@
 import { apiClient } from './client';
 import { UserContext } from '../types/chat';
 import {
+  AttentionItem,
+  PRArtifact,
   RequestStateResponse,
   RecommendationActionPayload,
+  RequestProgress,
 } from '../types/requests';
 
 export interface ConfirmSpecificationsResponse {
@@ -10,16 +13,16 @@ export interface ConfirmSpecificationsResponse {
   is_confirmed: boolean;
   message: string;
   next_agent: string;
-  pr: any;
-  progress: any;
-  attention_items: any[];
+  pr: PRArtifact;
+  progress: RequestProgress;
+  attention_items: AttentionItem[];
 }
 
 export interface ResolveAttentionResponse {
   thread_id: string;
   resolved_item_id: string;
   message: string;
-  attention_items: any[];
+  attention_items: AttentionItem[];
   blocking_count: number;
 }
 
@@ -29,8 +32,8 @@ export interface SubmitPRResponse {
   status: string;
   submitted_at: string;
   message: string;
-  pr: any;
-  progress: any;
+  pr: PRArtifact;
+  progress: RequestProgress;
 }
 
 function buildHeaders(userContext?: UserContext): Record<string, string> {
@@ -72,7 +75,7 @@ export const requestsApi = {
   },
 
   /**
-   * Action to accept, modify, or reject AI Demand recommendation (Option A).
+   * Records one of the four explicit user decisions on the AI recommendation.
    */
   async handleRecommendation(
     threadId: string,
@@ -96,7 +99,7 @@ export const requestsApi = {
     userContext?: UserContext
   ): Promise<ResolveAttentionResponse> {
     const response = await apiClient.post<ResolveAttentionResponse>(
-      `/requests/${threadId}/attention/${itemId}/resolve`,
+      `/requests/${threadId}/attention/${encodeURIComponent(itemId)}/resolve`,
       {},
       { headers: buildHeaders(userContext) }
     );
