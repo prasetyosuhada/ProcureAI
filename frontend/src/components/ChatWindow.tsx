@@ -35,14 +35,24 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   onConfirmSpecifications,
   activeAgentLabel = 'ProcureAI is analyzing requirements...',
 }) => {
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    container.scrollTo({
+      top: container.scrollHeight,
+      behavior: 'smooth',
+    });
   }, [messages, isLoading, isConfirming, showConfirmPrompt]);
 
   return (
-    <div className="flex-1 overflow-y-auto px-4 py-4 max-w-4xl w-full mx-auto flex flex-col justify-between">
+    <div
+      ref={scrollContainerRef}
+      data-testid="chat-scroll-area"
+      className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 max-w-4xl w-full mx-auto flex flex-col justify-between"
+    >
       {messages.length === 0 ? (
         /* Empty State Hero */
         <div className="h-full flex flex-col items-center justify-center text-center py-10 px-4 animate-fade-in my-auto">
@@ -188,7 +198,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           {/* Processing / Inline Activity Indicator */}
           {isLoading && <TypingIndicator label={activeAgentLabel} />}
 
-          <div ref={bottomRef} />
         </div>
       )}
     </div>

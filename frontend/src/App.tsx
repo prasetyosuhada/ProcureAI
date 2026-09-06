@@ -371,8 +371,8 @@ export const App: React.FC = () => {
         {/* 3. Split-Pane Workstation Layout */}
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-[580px] pb-6">
           {/* Left Column: Conversation Pane (Col span: 6/12) */}
-          <div className="lg:col-span-6 flex flex-col glass-panel rounded-2xl border border-slate-800/80 overflow-hidden shadow-xl shadow-black/40">
-            <div className="p-3.5 border-b border-slate-800/80 bg-slate-900/60 flex items-center justify-between">
+          <div className="h-[70vh] min-h-[520px] lg:sticky lg:top-4 lg:col-span-6 lg:h-[calc(100vh-12rem)] lg:min-h-[580px] flex flex-col glass-panel rounded-2xl border border-slate-800/80 overflow-hidden shadow-xl shadow-black/40">
+            <div className="shrink-0 p-3.5 border-b border-slate-800/80 bg-slate-900/60 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
                 <span className="text-sm font-semibold text-slate-200">
@@ -385,7 +385,7 @@ export const App: React.FC = () => {
             </div>
 
             {/* Chat Conversation View */}
-            <div className="flex-1 overflow-y-auto p-4 flex flex-col justify-between">
+            <div className="min-h-0 flex-1 p-4 flex flex-col">
               <ChatWindow
                 messages={messages}
                 isLoading={isSending}
@@ -401,7 +401,7 @@ export const App: React.FC = () => {
               />
 
               {/* Chat Input */}
-              <div className="pt-2">
+              <div className="shrink-0 pt-2">
                 <ChatInput
                   onSendMessage={(text) => handleSendMessage(text)}
                   isLoading={isSending || isConfirming}

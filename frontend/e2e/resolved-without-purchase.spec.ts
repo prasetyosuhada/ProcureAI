@@ -95,6 +95,17 @@ test('completes a fully covered monitor request without creating a PR', async ({
   await expect(page.getByText('PR Number')).toHaveCount(0);
   expect(failedApiResponses).toEqual([]);
 
+  const chatScrollArea = page.getByTestId('chat-scroll-area');
+  await expect
+    .poll(() =>
+      chatScrollArea.evaluate((element) => ({
+        hasOverflow: element.scrollHeight > element.clientHeight,
+        distanceFromBottom:
+          element.scrollHeight - element.clientHeight - element.scrollTop,
+      }))
+    )
+    .toEqual({ hasOverflow: true, distanceFromBottom: 0 });
+
   await page.screenshot({
     path: testInfo.outputPath('resolved-without-purchase.png'),
     fullPage: true,
