@@ -1,4 +1,5 @@
 import pytest
+from datetime import date
 from unittest.mock import patch
 from langchain_core.messages import HumanMessage
 from app.agent.state import create_initial_graph_state
@@ -15,7 +16,7 @@ def test_extract_requirement_heuristics_incomplete():
 def test_extract_requirement_heuristics_complete():
     """Verify extraction on complete user request."""
     user_text = "I need 10 laptops for backend development before Sept 1 with 32GB RAM and 1TB SSD"
-    draft = extract_requirement_heuristics(user_text, {})
+    draft = extract_requirement_heuristics(user_text, {}, reference_date=date(2026, 8, 1))
     assert draft["item"] == "Laptop"
     assert draft["quantity"] == 10
     assert draft["purpose"] == "Backend Development Team"
@@ -23,6 +24,39 @@ def test_extract_requirement_heuristics_complete():
     assert draft["specifications"]["ram"] == "32GB"
     assert draft["specifications"]["storage"] == "1TB SSD"
     assert draft["is_complete"] is True
+
+
+@pytest.mark.parametrize(
+    ("user_text", "today", "expected"),
+    [
+        ("Need laptops next week", date(2026, 9, 6), "2026-09-13"),
+        ("Need laptops next month", date(2026, 1, 31), "2026-02-28"),
+        ("Need laptops before Sept 15", date(2026, 9, 6), "2026-09-15"),
+        ("Need laptops before Sept 1", date(2026, 9, 6), "2027-09-01"),
+    ],
+)
+def test_extract_requirement_dates_use_runtime_date(user_text, today, expected):
+    draft = extract_requirement_heuristics(user_text, {}, reference_date=today)
+    assert draft["required_date"] == expected
+
+
+@pytest.mark.asyncio
+async def test_current_date_question_uses_backend_clock_without_mutating_draft():
+    state = create_initial_graph_state({"user_id": "usr_1", "department_id": "DEPT-ENG"})
+    original_draft = dict(state["requirement_draft"])
+    state["messages"] = [HumanMessage(content="tanggal berapa hari ini?")]
+
+    with patch(
+        "app.agent.nodes.clarification_node.get_business_today",
+        return_value=date(2026, 9, 6),
+    ), patch("app.agent.nodes.clarification_node.ChatGoogleGenerativeAI") as mock_llm:
+        result = await requirement_clarification_node(state)
+
+    assert result["messages"][0].content == "Hari ini tanggal 6 September 2026 (Asia/Jakarta)."
+    assert result["next_agent"] == "Clarification"
+    assert state["requirement_draft"] == original_draft
+    assert "requirement_draft" not in result
+    mock_llm.assert_not_called()
 
 @pytest.mark.asyncio
 async def test_clarification_node_incomplete():

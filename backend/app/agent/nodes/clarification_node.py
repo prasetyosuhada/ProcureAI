@@ -1,5 +1,8 @@
 import re
 import logging
+import calendar
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 from typing import Dict, Any, List, Sequence
 from langchain_core.messages import AIMessage, SystemMessage, BaseMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -19,6 +22,12 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 CLARIFICATION_TOOLS = [get_categories, get_specifications, get_procurement_policy]
+BUSINESS_TIMEZONE = ZoneInfo("Asia/Jakarta")
+
+MONTH_NAMES_ID = (
+    "", "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+    "Juli", "Agustus", "September", "Oktober", "November", "Desember",
+)
 
 
 # ==============================================================================
@@ -60,10 +69,86 @@ def get_last_user_message(messages: Sequence[BaseMessage]) -> str:
     return ""
 
 
+def get_business_today() -> date:
+    """Return the application's current calendar date in its business timezone."""
+    return datetime.now(BUSINESS_TIMEZONE).date()
+
+
+def _is_current_date_question(user_text: str) -> bool:
+    """Recognize direct Indonesian and English questions about today's date."""
+    normalized = " ".join(user_text.lower().strip().split())
+    patterns = (
+        r"\b(?:tanggal berapa hari ini|hari ini tanggal berapa)\b",
+        r"\bwhat(?:'s| is) (?:the date|today's date)(?: today)?\b",
+        r"\bwhat date is it(?: today)?\b",
+        r"\btoday's date\b",
+    )
+    return any(re.search(pattern, normalized) for pattern in patterns)
+
+
+def _format_current_date_answer(today: date, user_text: str) -> str:
+    if re.search(r"\b(?:tanggal|hari ini)\b", user_text.lower()):
+        return f"Hari ini tanggal {today.day} {MONTH_NAMES_ID[today.month]} {today.year} (Asia/Jakarta)."
+    return f"Today is {today.strftime('%B')} {today.day}, {today.year} (Asia/Jakarta)."
+
+
+def _add_one_month(value: date) -> date:
+    year = value.year + (1 if value.month == 12 else 0)
+    month = 1 if value.month == 12 else value.month + 1
+    day = min(value.day, calendar.monthrange(year, month)[1])
+    return date(year, month, day)
+
+
+def _extract_required_date(text_lower: str, today: date) -> str | None:
+    """Resolve explicit and relative requirement dates against runtime date."""
+    if "next week" in text_lower or "minggu depan" in text_lower:
+        return (today + timedelta(days=7)).isoformat()
+    if "next month" in text_lower or "bulan depan" in text_lower:
+        return _add_one_month(today).isoformat()
+
+    iso_match = re.search(r"\b(?:before|by|on|date|sebelum|pada|tanggal)?\s*(\d{4}-\d{2}-\d{2})\b", text_lower)
+    if iso_match:
+        return iso_match.group(1)
+
+    month_numbers = {
+        "jan": 1, "january": 1, "januari": 1,
+        "feb": 2, "february": 2, "februari": 2,
+        "mar": 3, "march": 3, "maret": 3,
+        "apr": 4, "april": 4,
+        "may": 5, "mei": 5,
+        "jun": 6, "june": 6, "juni": 6,
+        "jul": 7, "july": 7, "juli": 7,
+        "aug": 8, "august": 8, "agustus": 8,
+        "sep": 9, "sept": 9, "september": 9,
+        "oct": 10, "october": 10, "oktober": 10,
+        "nov": 11, "november": 11,
+        "dec": 12, "december": 12, "desember": 12,
+    }
+    month_pattern = "|".join(sorted(month_numbers, key=len, reverse=True))
+    named_match = re.search(
+        rf"\b(?:before|by|on|date|sebelum|pada|tanggal)?\s*({month_pattern})\s+(\d{{1,2}})(?:,?\s+(\d{{4}}))?\b",
+        text_lower,
+    )
+    if not named_match:
+        return None
+
+    month = month_numbers[named_match.group(1)]
+    day = int(named_match.group(2))
+    year = int(named_match.group(3)) if named_match.group(3) else today.year
+    try:
+        candidate = date(year, month, day)
+    except ValueError:
+        return None
+    if not named_match.group(3) and candidate < today:
+        candidate = candidate.replace(year=year + 1)
+    return candidate.isoformat()
+
+
 def extract_requirement_heuristics(
     user_text: str,
     current_draft: Dict[str, Any],
     resolve_category: bool = True,
+    reference_date: date | None = None,
 ) -> Dict[str, Any]:
     """
     Dynamic rule-based fallback extractor for any item request (IT, furniture, software, supplies).
@@ -159,15 +244,10 @@ def extract_requirement_heuristics(
     if gpu_match:
         specs["gpu"] = gpu_match.group(1).upper().strip()
 
-    # 5. Extract Required Date
-    if "sept" in text_lower or "september" in text_lower:
-        draft["required_date"] = "2026-09-01"
-    elif "next month" in text_lower or "next week" in text_lower:
-        draft["required_date"] = "2026-09-01"
-    else:
-        date_match = re.search(r'\b(?:before|by|on|date)\s+([a-zA-Z]+\s+\d{1,2}|\d{4}-\d{2}-\d{2})\b', text_lower)
-        if date_match:
-            draft["required_date"] = date_match.group(1).title()
+    # 5. Extract Required Date using the runtime business date.
+    required_date = _extract_required_date(text_lower, reference_date or get_business_today())
+    if required_date:
+        draft["required_date"] = required_date
 
     draft["specifications"] = specs
 
@@ -291,12 +371,16 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
     user_context = state.get("user_context", {})
     current_draft = state.get("requirement_draft", RequirementDraftSchema().model_dump())
     last_user_message = get_last_user_message(messages)
+    current_date = get_business_today()
 
     system_prompt = REQUIREMENT_CLARIFICATION_PROMPT.format(
         user_name=user_context.get("user_name", "User"),
         user_id=user_context.get("user_id", "usr_demo"),
         department_id=user_context.get("department_id", "DEPT-ENG"),
-        cost_center=user_context.get("cost_center", "CC-ENG-001")
+        cost_center=user_context.get("cost_center", "CC-ENG-001"),
+        current_date=current_date.isoformat(),
+        current_day=current_date.strftime("%A"),
+        timezone=str(BUSINESS_TIMEZONE),
     )
 
     updated_draft = dict(current_draft)
@@ -309,6 +393,21 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
         "Understanding purchase requirement",
         "running",
     )
+
+    # Calendar facts must come from the backend clock, not model memory.
+    if _is_current_date_question(last_user_message):
+        await emit_activity(
+            "clarification.extraction",
+            "requirement_extraction",
+            "Understanding purchase requirement",
+            "done",
+            "Current date resolved from the application timezone.",
+        )
+        return {
+            "messages": [AIMessage(content=_format_current_date_answer(current_date, last_user_message))],
+            "confirmation_action": False,
+            "next_agent": "Clarification",
+        }
 
     # --- Pass 1: Structured extraction ---
     if settings.GEMINI_API_KEY and settings.GEMINI_API_KEY != "your_gemini_api_key_here":
@@ -339,6 +438,7 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
                 last_user_message,
                 current_draft,
                 resolve_category=False,
+                reference_date=current_date,
             )
             agent_activity.append(AgentAction(
                 tool_name="heuristic_extractor",
@@ -351,6 +451,7 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
             last_user_message,
             current_draft,
             resolve_category=False,
+            reference_date=current_date,
         )
         agent_activity.append(AgentAction(
             tool_name="heuristic_extractor",

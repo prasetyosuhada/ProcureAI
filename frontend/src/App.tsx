@@ -492,7 +492,7 @@ export const App: React.FC = () => {
         {/* 3. Split-Pane Workstation Layout */}
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-[580px] pb-6">
           {/* Left Column: Conversation Pane (Col span: 6/12) */}
-          <div className="h-[70vh] min-h-[520px] lg:sticky lg:top-4 lg:col-span-6 lg:h-[calc(100vh-12rem)] lg:min-h-[580px] flex flex-col glass-panel rounded-2xl border border-slate-800/80 overflow-hidden shadow-xl shadow-black/40">
+          <div className="h-[150vh] min-h-[520px] lg:sticky lg:top-4 lg:col-span-6 lg:h-[calc(100vh-12rem)] lg:min-h-[580px] flex flex-col glass-panel rounded-2xl border border-slate-800/80 overflow-hidden shadow-xl shadow-black/40">
             <div className="shrink-0 p-3.5 border-b border-slate-800/80 bg-slate-900/60 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
