@@ -171,7 +171,12 @@ def test_create_initial_graph_state():
     assert state["user_context"]["user_id"] == "usr_101"
     assert state["pr"]["department"] == "DEPT-ENG"
     assert state["pr"]["cost_center"] == "CC-ENG-001"
-    assert state["progress"]["clarification"] == "in_progress"
+    assert state["progress"] == {
+        "clarification": "pending",
+        "demand_analysis": "pending",
+        "validation": "pending",
+        "ready_for_submission": "pending",
+    }
     assert state["progress"]["demand_analysis"] == "pending"
     assert state["demand"] is None
     assert state["agent_activity"] == []

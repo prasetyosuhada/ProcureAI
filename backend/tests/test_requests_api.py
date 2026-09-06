@@ -22,7 +22,12 @@ async def test_get_request_state_new_and_populated():
         assert res1.status_code == 200
         data1 = res1.json()
         assert data1["thread_id"] == "fresh_thread_999"
-        assert data1["progress"]["clarification"] == "in_progress"
+        assert data1["progress"] == {
+            "clarification": "pending",
+            "demand_analysis": "pending",
+            "validation": "pending",
+            "ready_for_submission": "pending",
+        }
         assert data1["pr"]["status"] == "draft"
         assert data1["demand"] is None
         assert data1["request_outcome"] == "open"

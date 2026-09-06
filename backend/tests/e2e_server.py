@@ -92,7 +92,8 @@ def run():
             "currency": "USD",
         }
 
-        uvicorn.run(app, host="127.0.0.1", port=8010)
+        port = int(os.environ.get("E2E_BACKEND_PORT", "8010"))
+        uvicorn.run(app, host="127.0.0.1", port=port)
 
 
 if __name__ == "__main__":

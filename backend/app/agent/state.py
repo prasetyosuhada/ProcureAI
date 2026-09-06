@@ -313,7 +313,9 @@ def create_initial_graph_state(user_context_dict: Dict[str, Any]) -> ProcureAISt
     dept = user_context_dict.get("department_id", "DEPT-ENG")
     cc = user_context_dict.get("cost_center", "CC-ENG-001")
     
-    initial_progress = RequestProgress(clarification="in_progress")
+    # A fresh thread has not started any workflow stage yet. Clarification becomes
+    # in_progress only after the first user message reaches the clarification node.
+    initial_progress = RequestProgress()
     initial_pr = PRArtifact(department=dept, cost_center=cc)
     
     return {

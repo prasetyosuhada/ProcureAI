@@ -13,6 +13,12 @@ npx playwright install --with-deps chromium
 npm run test:e2e
 ```
 
+If those ports are already occupied by development servers, override them:
+
+```bash
+E2E_FRONTEND_PORT=5174 E2E_BACKEND_PORT=8011 npm run test:e2e
+```
+
 `--with-deps` requires root privileges on Linux/WSL. CI may instead use the
 matching official Playwright image. Test traces and screenshots are written to
 `test-results/`; the HTML report is written to `playwright-report/`.

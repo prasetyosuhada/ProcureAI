@@ -4,10 +4,12 @@ test('completes a fully covered monitor request without creating a PR', async ({
   page,
 }, testInfo) => {
   const failedApiResponses: string[] = [];
+  const backendPort = process.env.E2E_BACKEND_PORT ?? '8010';
+  const apiBaseUrl = `http://127.0.0.1:${backendPort}/api`;
 
   page.on('response', (response) => {
     if (
-      response.url().startsWith('http://127.0.0.1:8010/api') &&
+      response.url().startsWith(apiBaseUrl) &&
       response.status() >= 400
     ) {
       failedApiResponses.push(
@@ -18,6 +20,8 @@ test('completes a fully covered monitor request without creating a PR', async ({
 
   await page.goto('/');
   await page.getByRole('button', { name: 'New Thread' }).click();
+  await expect(page.getByText('Pending', { exact: true })).toHaveCount(4);
+  await expect(page.getByText('In Progress', { exact: true })).toHaveCount(0);
   await page
     .getByPlaceholder(/Describe what you want to purchase/i)
     .fill('Need 5 4K monitors for UI/UX designers before Sept 15');

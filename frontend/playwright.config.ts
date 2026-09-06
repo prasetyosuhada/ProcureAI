@@ -1,5 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const frontendPort = process.env.E2E_FRONTEND_PORT ?? '5173';
+const backendPort = process.env.E2E_BACKEND_PORT ?? '8010';
+
 export default defineConfig({
   testDir: './e2e',
   timeout: 60_000,
@@ -12,7 +15,7 @@ export default defineConfig({
   ],
   outputDir: 'test-results',
   use: {
-    baseURL: 'http://127.0.0.1:5173',
+    baseURL: `http://127.0.0.1:${frontendPort}`,
     trace: 'on',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
@@ -20,9 +23,9 @@ export default defineConfig({
   webServer: [
     {
       command:
-        'UV_CACHE_DIR=/tmp/procure-ai-uv-cache GEMINI_API_KEY= uv run python tests/e2e_server.py',
+        `UV_CACHE_DIR=/tmp/procure-ai-uv-cache GEMINI_API_KEY= E2E_BACKEND_PORT=${backendPort} uv run python tests/e2e_server.py`,
       cwd: '../backend',
-      url: 'http://127.0.0.1:8010/health',
+      url: `http://127.0.0.1:${backendPort}/health`,
       reuseExistingServer: false,
       timeout: 120_000,
       stdout: 'pipe',
@@ -30,9 +33,9 @@ export default defineConfig({
     },
     {
       command:
-        'VITE_API_BASE_URL=http://127.0.0.1:8010/api npm run dev -- --host 127.0.0.1 --port 5173',
+        `VITE_API_BASE_URL=http://127.0.0.1:${backendPort}/api npm run dev -- --host 127.0.0.1 --port ${frontendPort}`,
       cwd: '.',
-      url: 'http://127.0.0.1:5173',
+      url: `http://127.0.0.1:${frontendPort}`,
       reuseExistingServer: false,
       timeout: 120_000,
       stdout: 'pipe',
