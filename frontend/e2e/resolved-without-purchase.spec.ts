@@ -37,6 +37,8 @@ test('completes a fully covered monitor request without creating a PR', async ({
     'section[aria-labelledby="recommendation-title"]'
   );
   await expect(recommendationCard).toBeVisible();
+  await expect(page.getByText('Awaiting Human Review', { exact: true })).toBeVisible();
+  await expect(page.getByText('GeneratePR Agent', { exact: true })).toHaveCount(0);
   await expect(
     recommendationCard.getByText('Recommended net new purchase', {
       exact: true,
@@ -92,6 +94,7 @@ test('completes a fully covered monitor request without creating a PR', async ({
     page.getByText('Request completed without a new purchase')
   ).toBeVisible();
   await expect(page.getByText('No PR Needed')).toBeVisible();
+  await expect(page.getByText('Workflow Complete', { exact: true })).toBeVisible();
   await expect(page.getByText('PR Number')).toHaveCount(0);
   expect(failedApiResponses).toEqual([]);
 

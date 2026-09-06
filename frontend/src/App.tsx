@@ -32,6 +32,28 @@ function getApiErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
+function getAssistantContextLabel(
+  nextAgent?: string,
+  requestOutcome?: string
+): string {
+  if (requestOutcome === 'rejected') return 'Request Paused';
+  if (
+    requestOutcome === 'purchase_submitted' ||
+    requestOutcome === 'resolved_without_purchase' ||
+    nextAgent === 'End'
+  ) {
+    return 'Workflow Complete';
+  }
+
+  const labels: Record<string, string> = {
+    Clarification: 'Requirement Clarification Agent',
+    Demand: 'Demand Analysis Agent',
+    GeneratePR: 'Awaiting Human Review',
+  };
+
+  return labels[nextAgent || 'Clarification'] || 'ProcureAI Workflow';
+}
+
 export const App: React.FC = () => {
   const [threadId, setThreadId] = useState<string>(() => {
     return (
@@ -380,7 +402,10 @@ export const App: React.FC = () => {
                 </span>
               </div>
               <span className="text-[11px] text-slate-400 font-mono">
-                {requestState?.next_agent || 'Clarification'} Agent
+                {getAssistantContextLabel(
+                  requestState?.next_agent,
+                  requestState?.request_outcome
+                )}
               </span>
             </div>
 
