@@ -20,12 +20,24 @@ test('completes a fully covered monitor request without creating a PR', async ({
 
   await page.goto('/');
   await page.getByRole('button', { name: 'New Thread' }).click();
+  const agentTeam = page.getByTestId('agent-team-panel');
+  await expect(agentTeam).toBeVisible();
+  await expect(agentTeam.getByText('2 agents', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('agent-clarification-status')).toHaveText(
+    /Waiting/i
+  );
+  await expect(page.getByTestId('agent-demand-status')).toHaveText(/Waiting/i);
+  await expect(agentTeam.getByText('Workflow Orchestrator')).toBeVisible();
   await expect(page.getByText('Pending', { exact: true })).toHaveCount(4);
   await expect(page.getByText('In Progress', { exact: true })).toHaveCount(0);
   await page
     .getByPlaceholder(/Describe what you want to purchase/i)
     .fill('Need 5 4K monitors for UI/UX designers before Sept 15');
+  const clarificationWorking = expect(
+    page.getByTestId('agent-clarification-status')
+  ).toHaveText(/Working/i);
   await page.getByTitle('Send Message').click();
+  await clarificationWorking;
 
   const activityFeed = page.getByTestId('transient-activity-feed');
   await expect(activityFeed).toBeVisible();
@@ -35,7 +47,11 @@ test('completes a fully covered monitor request without creating a PR', async ({
     name: /Confirm Specifications & Proceed to Demand Analysis/i,
   });
   await expect(confirmButton).toBeVisible();
+  const demandWorking = expect(
+    page.getByTestId('agent-demand-status')
+  ).toHaveText(/Working/i);
   await confirmButton.click();
+  await demandWorking;
 
   await expect(activityFeed).toBeVisible();
   await expect(activityFeed).toContainText('Checking warehouse inventory');
@@ -47,6 +63,12 @@ test('completes a fully covered monitor request without creating a PR', async ({
     'section[aria-labelledby="recommendation-title"]'
   );
   await expect(recommendationCard).toBeVisible();
+  await expect(page.getByTestId('agent-clarification-status')).toHaveText(
+    /Completed/i
+  );
+  await expect(page.getByTestId('agent-demand-status')).toHaveText(
+    /Completed/i
+  );
   await expect(page.getByText('Agent Actions & Telemetry')).toBeVisible();
   await expect(page.getByText('Awaiting Human Review', { exact: true })).toBeVisible();
   await expect(page.getByText('GeneratePR Agent', { exact: true })).toHaveCount(0);

@@ -7,6 +7,7 @@ import { ChatInput } from './components/ChatInput';
 import { PRArtifactCard } from './components/PRArtifactCard';
 import { DemandAnalysisPanel } from './components/DemandAnalysisPanel';
 import { AgentActivityStrip } from './components/AgentActivityStrip';
+import { AgentTeamPanel } from './components/AgentTeamPanel';
 import { RecommendationCard } from './components/RecommendationCard';
 import { AttentionBanner } from './components/AttentionBanner';
 import { SubmissionBar } from './components/SubmissionBar';
@@ -539,7 +540,23 @@ export const App: React.FC = () => {
 
           {/* Right Column: Interactive Artifact Workspace (Col span: 6/12) */}
           <div className="lg:col-span-6 flex flex-col gap-4">
-            {/* 1. Purchase Requisition Artifact Card */}
+            {/* 1. Agent roster and live ownership */}
+            <AgentTeamPanel
+              progress={requestState?.progress}
+              nextAgent={requestState?.next_agent}
+              requestOutcome={requestState?.request_outcome}
+              transientActivities={transientActivities}
+              isRunActive={isSending || isConfirming}
+              activeAgentHint={
+                isConfirming
+                  ? 'demand'
+                  : isSending
+                  ? 'clarification'
+                  : undefined
+              }
+            />
+
+            {/* 2. Purchase Requisition Artifact Card */}
             <PRArtifactCard pr={requestState?.pr} />
 
             {/* 2. Demand & Inventory Optimization Panel */}
