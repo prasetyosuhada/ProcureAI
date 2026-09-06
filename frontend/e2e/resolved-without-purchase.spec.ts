@@ -27,16 +27,27 @@ test('completes a fully covered monitor request without creating a PR', async ({
     .fill('Need 5 4K monitors for UI/UX designers before Sept 15');
   await page.getByTitle('Send Message').click();
 
+  const activityFeed = page.getByTestId('transient-activity-feed');
+  await expect(activityFeed).toBeVisible();
+  await expect(activityFeed).toContainText('Understanding purchase requirement');
+
   const confirmButton = page.getByRole('button', {
     name: /Confirm Specifications & Proceed to Demand Analysis/i,
   });
   await expect(confirmButton).toBeVisible();
   await confirmButton.click();
 
+  await expect(activityFeed).toBeVisible();
+  await expect(activityFeed).toContainText('Checking warehouse inventory');
+  await page.screenshot({
+    path: testInfo.outputPath('streaming-demand-activity.png'),
+  });
+
   const recommendationCard = page.locator(
     'section[aria-labelledby="recommendation-title"]'
   );
   await expect(recommendationCard).toBeVisible();
+  await expect(page.getByText('Agent Actions & Telemetry')).toBeVisible();
   await expect(page.getByText('Awaiting Human Review', { exact: true })).toBeVisible();
   await expect(page.getByText('GeneratePR Agent', { exact: true })).toHaveCount(0);
   await expect(
@@ -48,6 +59,10 @@ test('completes a fully covered monitor request without creating a PR', async ({
   await expect(
     recommendationCard.getByText('units', { exact: true })
   ).toBeVisible();
+  await expect(activityFeed).toHaveCount(0, { timeout: 3_000 });
+
+  await page.getByRole('button', { name: 'Sync State' }).click();
+  await expect(activityFeed).toHaveCount(0);
 
   await recommendationCard
     .getByRole('button', { name: 'Accept 0 units' })

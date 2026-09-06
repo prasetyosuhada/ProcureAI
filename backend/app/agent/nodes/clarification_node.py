@@ -12,6 +12,7 @@ from app.agent.state import (
     AttentionItem,
 )
 from app.agent.prompts import REQUIREMENT_CLARIFICATION_PROMPT
+from app.agent.activity import emit_activity, run_with_activity
 from app.tools.clarification_tools import get_categories, get_specifications, get_procurement_policy
 from app.core.config import settings
 
@@ -59,7 +60,11 @@ def get_last_user_message(messages: Sequence[BaseMessage]) -> str:
     return ""
 
 
-def extract_requirement_heuristics(user_text: str, current_draft: Dict[str, Any]) -> Dict[str, Any]:
+def extract_requirement_heuristics(
+    user_text: str,
+    current_draft: Dict[str, Any],
+    resolve_category: bool = True,
+) -> Dict[str, Any]:
     """
     Dynamic rule-based fallback extractor for any item request (IT, furniture, software, supplies).
     Used during offline tests or when LLM API key is unavailable.
@@ -97,7 +102,7 @@ def extract_requirement_heuristics(user_text: str, current_draft: Dict[str, Any]
                         item_title = item_title[:-1]
                     draft["item"] = item_title
 
-    if draft.get("item") and not draft.get("category"):
+    if resolve_category and draft.get("item") and not draft.get("category"):
         cat_results = get_categories.invoke({"query": draft["item"]})
         if cat_results:
             draft["category"] = cat_results[0]["category_name"]
@@ -216,7 +221,8 @@ def _build_pr_artifact_from_draft(
 
 def _build_clarification_attention_items(
     draft: Dict[str, Any],
-    user_context: Dict[str, Any]
+    user_context: Dict[str, Any],
+    policy_result: Dict[str, Any] | None = None,
 ) -> List[Dict[str, Any]]:
     """
     Generates AttentionItem list based on specification and policy checks.
@@ -240,10 +246,14 @@ def _build_clarification_attention_items(
     ram_val = specs.get("ram") or specs.get("RAM", "")
     if ram_val:
         try:
-            policy_result = get_procurement_policy.invoke({
-                "item_name": draft.get("item", "General Item")
-            })
-            max_ram = policy_result.get("max_specs", {}).get("ram", "")
+            resolved_policy = (
+                policy_result
+                if policy_result is not None
+                else get_procurement_policy.invoke({
+                    "item_name": draft.get("item", "General Item")
+                })
+            )
+            max_ram = resolved_policy.get("max_specs", {}).get("ram", "")
             if max_ram and ram_val and int(''.join(filter(str.isdigit, str(ram_val)))) > int(''.join(filter(str.isdigit, str(max_ram)))):
                 items.append(AttentionItem(
                     id="spec_ram",
@@ -293,6 +303,13 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
     agent_activity: List[Dict[str, Any]] = []
     llm_response_text: str | None = None
 
+    await emit_activity(
+        "clarification.extraction",
+        "requirement_extraction",
+        "Understanding purchase requirement",
+        "running",
+    )
+
     # --- Pass 1: Structured extraction ---
     if settings.GEMINI_API_KEY and settings.GEMINI_API_KEY != "your_gemini_api_key_here":
         try:
@@ -318,7 +335,11 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
             ).model_dump())
         except Exception as e:
             logger.warning(f"Gemini LLM extraction fallback to dynamic parser: {e}")
-            updated_draft = extract_requirement_heuristics(last_user_message, current_draft)
+            updated_draft = extract_requirement_heuristics(
+                last_user_message,
+                current_draft,
+                resolve_category=False,
+            )
             agent_activity.append(AgentAction(
                 tool_name="heuristic_extractor",
                 label="Parsing requirement (offline mode)",
@@ -326,13 +347,40 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
                 result_summary=f"Heuristic: item={updated_draft.get('item')}, qty={updated_draft.get('quantity')}"
             ).model_dump())
     else:
-        updated_draft = extract_requirement_heuristics(last_user_message, current_draft)
+        updated_draft = extract_requirement_heuristics(
+            last_user_message,
+            current_draft,
+            resolve_category=False,
+        )
         agent_activity.append(AgentAction(
             tool_name="heuristic_extractor",
             label="Parsing requirement (offline mode)",
             status="done",
             result_summary=f"item={updated_draft.get('item')}, qty={updated_draft.get('quantity')}"
         ).model_dump())
+
+    await emit_activity(
+        "clarification.extraction",
+        "requirement_extraction",
+        "Understanding purchase requirement",
+        "done",
+        "Requirement details extracted.",
+    )
+
+    if updated_draft.get("item") and not updated_draft.get("category"):
+        category_results = await run_with_activity(
+            "clarification.category",
+            "get_categories",
+            "Matching procurement category",
+            lambda: get_categories.invoke({"query": updated_draft["item"]}),
+            lambda result: (
+                result[0].get("category_name", "Category matched")
+                if result
+                else "No matching category found"
+            ),
+        )
+        if category_results:
+            updated_draft["category"] = category_results[0]["category_name"]
 
     print("Updated Draft:\n", updated_draft)
 
@@ -355,9 +403,32 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
         progress_update = {"clarification": "in_progress"}
 
     # --- Phase 1: Build AttentionItems from spec/policy checks ---
-    new_attention_items = _build_clarification_attention_items(updated_draft, user_context)
+    specs = updated_draft.get("specifications", {})
+    ram_value = specs.get("ram") or specs.get("RAM", "")
+    policy_result = None
+    if ram_value:
+        policy_result = await run_with_activity(
+            "clarification.policy",
+            "get_procurement_policy",
+            "Checking procurement policy",
+            lambda: get_procurement_policy.invoke({
+                "item_name": updated_draft.get("item", "General Item")
+            }),
+            lambda _result: "Relevant specification policy checked.",
+        )
+    new_attention_items = _build_clarification_attention_items(
+        updated_draft,
+        user_context,
+        policy_result=policy_result,
+    )
 
     # --- Pass 2: Generate natural language response ---
+    await emit_activity(
+        "clarification.response",
+        "response_generation",
+        "Preparing assistant response",
+        "running",
+    )
     if settings.GEMINI_API_KEY and settings.GEMINI_API_KEY != "your_gemini_api_key_here":
         try:
             llm = ChatGoogleGenerativeAI(
@@ -451,6 +522,14 @@ async def requirement_clarification_node(state: GraphState) -> Dict[str, Any]:
 
     print("Final Response Content:\n", response_content)
     ai_message = AIMessage(content=response_content)
+
+    await emit_activity(
+        "clarification.response",
+        "response_generation",
+        "Preparing assistant response",
+        "done",
+        "Response is ready.",
+    )
 
     return {
         "messages": [ai_message],

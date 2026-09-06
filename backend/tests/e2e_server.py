@@ -2,6 +2,7 @@
 
 import os
 import sys
+import time
 from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
@@ -17,7 +18,14 @@ from main import app  # noqa: E402
 settings.GEMINI_API_KEY = ""
 
 
+def pause_for_browser_observation():
+    delay_ms = int(os.environ.get("E2E_TOOL_DELAY_MS", "0"))
+    if delay_ms > 0:
+        time.sleep(delay_ms / 1000)
+
+
 def categories(args):
+    pause_for_browser_observation()
     query = str(args["query"]).lower()
     if "monitor" in query:
         return [
@@ -35,6 +43,7 @@ def categories(args):
 
 
 def inventory(args):
+    pause_for_browser_observation()
     item_name = args["item_name"]
     return {
         "item": item_name,
@@ -43,6 +52,7 @@ def inventory(args):
 
 
 def assets(args):
+    pause_for_browser_observation()
     item_name = args["item_name"]
     return {
         "item": item_name,
@@ -85,12 +95,16 @@ def run():
         }
         node_inventory.invoke.side_effect = inventory
         node_assets.invoke.side_effect = assets
-        node_pipeline.invoke.return_value = {"total_in_pipeline": 0}
-        node_history.invoke.return_value = {"average_unit_cost_usd": 350.0}
-        node_budget.invoke.return_value = {
-            "remaining_budget": 33_000.0,
-            "currency": "USD",
-        }
+        node_pipeline.invoke.side_effect = lambda _args: (
+            pause_for_browser_observation() or {"total_in_pipeline": 0}
+        )
+        node_history.invoke.side_effect = lambda _args: (
+            pause_for_browser_observation() or {"average_unit_cost_usd": 350.0}
+        )
+        node_budget.invoke.side_effect = lambda _args: (
+            pause_for_browser_observation()
+            or {"remaining_budget": 33_000.0, "currency": "USD"}
+        )
 
         port = int(os.environ.get("E2E_BACKEND_PORT", "8010"))
         uvicorn.run(app, host="127.0.0.1", port=port)

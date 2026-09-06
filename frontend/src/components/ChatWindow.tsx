@@ -15,6 +15,8 @@ import { ChatMessage } from '../types/chat';
 import { PRArtifact } from '../types/requests';
 import { ChatMessageBubble } from './ChatMessageBubble';
 import { TypingIndicator } from './TypingIndicator';
+import { TransientActivityFeed } from './TransientActivityFeed';
+import { TransientActivity } from '../types/requests';
 
 interface ChatWindowProps {
   messages: ChatMessage[];
@@ -24,6 +26,8 @@ interface ChatWindowProps {
   showConfirmPrompt?: boolean;
   onConfirmSpecifications?: () => void;
   activeAgentLabel?: string;
+  transientActivities?: TransientActivity[];
+  activitiesFading?: boolean;
 }
 
 export const ChatWindow: React.FC<ChatWindowProps> = ({
@@ -34,6 +38,8 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   showConfirmPrompt = false,
   onConfirmSpecifications,
   activeAgentLabel = 'ProcureAI is analyzing requirements...',
+  transientActivities = [],
+  activitiesFading = false,
 }) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -45,7 +51,14 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       top: container.scrollHeight,
       behavior: 'smooth',
     });
-  }, [messages, isLoading, isConfirming, showConfirmPrompt]);
+  }, [
+    messages,
+    isLoading,
+    isConfirming,
+    showConfirmPrompt,
+    transientActivities,
+    activitiesFading,
+  ]);
 
   return (
     <div
@@ -196,7 +209,14 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           )}
 
           {/* Processing / Inline Activity Indicator */}
-          {isLoading && <TypingIndicator label={activeAgentLabel} />}
+          {transientActivities.length > 0 ? (
+            <TransientActivityFeed
+              activities={transientActivities}
+              isFading={activitiesFading}
+            />
+          ) : (
+            isLoading && <TypingIndicator label={activeAgentLabel} />
+          )}
 
         </div>
       )}

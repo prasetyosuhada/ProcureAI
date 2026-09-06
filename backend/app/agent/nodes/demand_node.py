@@ -11,6 +11,7 @@ from app.agent.state import (
     AttentionItem,
 )
 from app.agent.prompts import DEMAND_ANALYSIS_PROMPT
+from app.agent.activity import emit_activity, run_with_activity
 from app.tools.demand_tools import (
     get_inventory,
     get_assets,
@@ -204,7 +205,13 @@ async def demand_analysis_node(state: GraphState) -> Dict[str, Any]:
     agent_activity: List[Dict[str, Any]] = []
 
     # 1. Fetch deterministic data via Demand Tools (ground truth; prevents LLM math hallucination)
-    inventory_res = get_inventory.invoke({"item_name": item_name, "category_id": category_id})
+    inventory_res = await run_with_activity(
+        "demand.inventory",
+        "get_inventory",
+        "Checking warehouse inventory",
+        lambda: get_inventory.invoke({"item_name": item_name, "category_id": category_id}),
+        lambda result: f"{result.get('available_quantity', 0)} units in stock",
+    )
     agent_activity.append(AgentAction(
         tool_name="get_inventory",
         label="Checking warehouse inventory",
@@ -212,7 +219,13 @@ async def demand_analysis_node(state: GraphState) -> Dict[str, Any]:
         result_summary=f"{inventory_res.get('available_quantity', 0)} units in stock"
     ).model_dump())
 
-    assets_res = get_assets.invoke({"item_name": item_name})
+    assets_res = await run_with_activity(
+        "demand.assets",
+        "get_assets",
+        "Scanning idle & returning assets",
+        lambda: get_assets.invoke({"item_name": item_name}),
+        lambda result: f"{result.get('total_available_soon', 0)} assignable assets found",
+    )
     agent_activity.append(AgentAction(
         tool_name="get_assets",
         label="Scanning idle & returning assets",
@@ -220,7 +233,16 @@ async def demand_analysis_node(state: GraphState) -> Dict[str, Any]:
         result_summary=f"{assets_res.get('total_available_soon', 0)} assignable assets found"
     ).model_dump())
 
-    pipeline_res = get_open_prs_and_pos.invoke({"item_name": item_name, "department_id": dept_id})
+    pipeline_res = await run_with_activity(
+        "demand.pipeline",
+        "get_open_prs_and_pos",
+        "Checking open PRs & POs in pipeline",
+        lambda: get_open_prs_and_pos.invoke({
+            "item_name": item_name,
+            "department_id": dept_id,
+        }),
+        lambda result: f"{result.get('total_in_pipeline', 0)} units already in pipeline",
+    )
     agent_activity.append(AgentAction(
         tool_name="get_open_prs_and_pos",
         label="Checking open PRs & POs in pipeline",
@@ -228,7 +250,13 @@ async def demand_analysis_node(state: GraphState) -> Dict[str, Any]:
         result_summary=f"{pipeline_res.get('total_in_pipeline', 0)} units already in pipeline"
     ).model_dump())
 
-    budget_res = get_budget_status.invoke({"cost_center": cost_center})
+    budget_res = await run_with_activity(
+        "demand.budget",
+        "get_budget_status",
+        "Verifying department budget",
+        lambda: get_budget_status.invoke({"cost_center": cost_center}),
+        lambda result: f"${result.get('remaining_budget', 0):,.0f} remaining in {cost_center}",
+    )
     agent_activity.append(AgentAction(
         tool_name="get_budget_status",
         label="Verifying department budget",
@@ -236,7 +264,16 @@ async def demand_analysis_node(state: GraphState) -> Dict[str, Any]:
         result_summary=f"${budget_res.get('remaining_budget', 0):,.0f} remaining in {cost_center}"
     ).model_dump())
 
-    purchase_history = get_purchase_history.invoke({"item_name": item_name, "department_id": dept_id})
+    purchase_history = await run_with_activity(
+        "demand.history",
+        "get_purchase_history",
+        "Reviewing 12-month purchase history",
+        lambda: get_purchase_history.invoke({
+            "item_name": item_name,
+            "department_id": dept_id,
+        }),
+        lambda result: f"Avg unit cost: ${result.get('average_unit_cost', 0):,.0f}",
+    )
     agent_activity.append(AgentAction(
         tool_name="get_purchase_history",
         label="Reviewing 12-month purchase history",
@@ -250,6 +287,12 @@ async def demand_analysis_node(state: GraphState) -> Dict[str, Any]:
     total_existing = inv_qty + asset_qty
 
     # 2. Quantitative Net Demand Calculation
+    await emit_activity(
+        "demand.calculation",
+        "calculate_net_demand",
+        "Calculating net purchase requirement",
+        "running",
+    )
     net_demand = max(0, requested_qty - total_existing)
     recommended_qty = net_demand
 
@@ -263,6 +306,13 @@ async def demand_analysis_node(state: GraphState) -> Dict[str, Any]:
             f"[demand_analysis_node] Manual override active: using net_new_purchase={recommended_qty} "
             f"(reason: {override_reason}). Calculated value {net_demand} was NOT applied."
         )
+    await emit_activity(
+        "demand.calculation",
+        "calculate_net_demand",
+        "Calculating net purchase requirement",
+        "done",
+        f"Recommended net new purchase: {recommended_qty} units",
+    )
 
     # 4. System prompt format
     system_prompt = DEMAND_ANALYSIS_PROMPT.format(
@@ -274,6 +324,12 @@ async def demand_analysis_node(state: GraphState) -> Dict[str, Any]:
 
     # 5. Gemini LLM: Generate professional justification
     justification = ""
+    await emit_activity(
+        "demand.justification",
+        "generate_justification",
+        "Preparing recommendation rationale",
+        "running",
+    )
     if settings.GEMINI_API_KEY and settings.GEMINI_API_KEY != "your_gemini_api_key_here":
         try:
             llm = ChatGoogleGenerativeAI(
@@ -311,6 +367,13 @@ async def demand_analysis_node(state: GraphState) -> Dict[str, Any]:
         justification = generate_default_justification(
             requested_qty, inv_qty, asset_qty, recommended_qty, pipeline_qty, cost_center, budget_res, item_name
         )
+    await emit_activity(
+        "demand.justification",
+        "generate_justification",
+        "Preparing recommendation rationale",
+        "done",
+        "Recommendation rationale is ready.",
+    )
 
     # 6. Build Phase 1 DemandBreakdown payload
     estimated_saving = float(purchase_history.get("average_unit_cost", 0) * total_existing) if total_existing > 0 else None

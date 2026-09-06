@@ -1,4 +1,5 @@
 import { apiClient } from './client';
+import { streamPost, StreamRequestOptions } from './streaming';
 import { UserContext } from '../types/chat';
 import {
   AttentionItem,
@@ -90,6 +91,19 @@ export const requestsApi = {
       { headers: buildHeaders(userContext) }
     );
     return response.data;
+  },
+
+  async streamConfirmSpecifications(
+    threadId: string,
+    userContext: UserContext | undefined,
+    options: StreamRequestOptions
+  ): Promise<ConfirmSpecificationsResponse> {
+    return streamPost<ConfirmSpecificationsResponse>(
+      `/requests/${threadId}/confirm-specifications/stream`,
+      {},
+      userContext,
+      options
+    );
   },
 
   /**

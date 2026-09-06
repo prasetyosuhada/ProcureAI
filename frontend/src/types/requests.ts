@@ -50,6 +50,10 @@ export interface AgentAction {
   result_summary?: string | null;
 }
 
+export interface TransientActivity extends AgentAction {
+  id: string;
+}
+
 export interface AttentionItem {
   id: string;
   category: 'specification' | 'budget' | 'policy';

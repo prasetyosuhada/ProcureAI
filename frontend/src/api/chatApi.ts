@@ -1,10 +1,18 @@
 import { apiClient } from './client';
 import { UserContext, RequirementDraft, DemandAnalysis, PRDraft } from '../types/chat';
+import { streamPost, StreamRequestOptions } from './streaming';
 
 export interface ChatApiRequest {
   thread_id?: string;
   message: string;
-  requirement_override?: Record<string, any>;
+  requirement_override?: Record<string, unknown>;
+}
+
+interface AuthContextResponse {
+  user_id: string;
+  user_name: string;
+  department_id: string;
+  cost_center: string;
 }
 
 export interface ChatApiResponse {
@@ -40,11 +48,24 @@ export const chatApi = {
     return response.data;
   },
 
+  async streamMessage(
+    payload: ChatApiRequest,
+    userContext: UserContext | undefined,
+    options: StreamRequestOptions
+  ): Promise<ChatApiResponse> {
+    return streamPost<ChatApiResponse>(
+      '/chat/stream',
+      payload,
+      userContext,
+      options
+    );
+  },
+
   /**
    * Fetches user context from the backend.
    */
   async getMyContext(): Promise<UserContext> {
-    const response = await apiClient.get<any>('/v1/auth/me');
+    const response = await apiClient.get<AuthContextResponse>('/v1/auth/me');
     return {
       userId: response.data.user_id,
       userName: response.data.user_name,

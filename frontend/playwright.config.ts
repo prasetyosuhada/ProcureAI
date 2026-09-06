@@ -23,7 +23,7 @@ export default defineConfig({
   webServer: [
     {
       command:
-        `UV_CACHE_DIR=/tmp/procure-ai-uv-cache GEMINI_API_KEY= E2E_BACKEND_PORT=${backendPort} uv run python tests/e2e_server.py`,
+        `UV_CACHE_DIR=/tmp/procure-ai-uv-cache GEMINI_API_KEY= E2E_BACKEND_PORT=${backendPort} E2E_TOOL_DELAY_MS=150 uv run python tests/e2e_server.py`,
       cwd: '../backend',
       url: `http://127.0.0.1:${backendPort}/health`,
       reuseExistingServer: false,

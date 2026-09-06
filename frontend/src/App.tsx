@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { isAxiosError } from 'axios';
 import { Navbar } from './components/Navbar';
 import { RequestProgressStepper } from './components/RequestProgressStepper';
@@ -11,7 +11,10 @@ import { RecommendationCard } from './components/RecommendationCard';
 import { AttentionBanner } from './components/AttentionBanner';
 import { SubmissionBar } from './components/SubmissionBar';
 import { UserContext, ChatMessage } from './types/chat';
-import { RecommendationActionPayload } from './types/requests';
+import {
+  RecommendationActionPayload,
+  TransientActivity,
+} from './types/requests';
 import { useRequestState } from './hooks/useRequestState';
 import { chatApi } from './api/chatApi';
 import {
@@ -101,6 +104,13 @@ export const App: React.FC = () => {
     useState<SubmitPRResponse | null>(null);
   const [resolutionResult, setResolutionResult] =
     useState<ResolveWithoutPurchaseResponse | null>(null);
+  const [transientActivities, setTransientActivities] = useState<
+    TransientActivity[]
+  >([]);
+  const [activitiesFading, setActivitiesFading] = useState(false);
+  const streamAbortRef = useRef<AbortController | null>(null);
+  const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Phase 1 State Hydration Hook
   const {
@@ -140,7 +150,72 @@ export const App: React.FC = () => {
     }
   }, [requestState?.messages]);
 
+  useEffect(
+    () => () => {
+      streamAbortRef.current?.abort();
+      if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+      if (clearTimerRef.current) clearTimeout(clearTimerRef.current);
+    },
+    []
+  );
+
+  const clearActivityTimers = () => {
+    if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+    if (clearTimerRef.current) clearTimeout(clearTimerRef.current);
+    fadeTimerRef.current = null;
+    clearTimerRef.current = null;
+  };
+
+  const beginActivityStream = () => {
+    streamAbortRef.current?.abort();
+    clearActivityTimers();
+    setTransientActivities([]);
+    setActivitiesFading(false);
+    const controller = new AbortController();
+    streamAbortRef.current = controller;
+    return controller;
+  };
+
+  const handleStreamActivity = (activity: TransientActivity) => {
+    setTransientActivities((current) => {
+      const index = current.findIndex((item) => item.id === activity.id);
+      if (index === -1) return [...current, activity];
+      return current.map((item, itemIndex) =>
+        itemIndex === index ? { ...item, ...activity } : item
+      );
+    });
+  };
+
+  const scheduleActivityFade = () => {
+    clearActivityTimers();
+    fadeTimerRef.current = setTimeout(() => setActivitiesFading(true), 700);
+    clearTimerRef.current = setTimeout(() => {
+      setTransientActivities([]);
+      setActivitiesFading(false);
+    }, 1_200);
+  };
+
+  const markRunningActivitiesFailed = () => {
+    setTransientActivities((current) =>
+      current.map((activity) =>
+        activity.status === 'running'
+          ? {
+              ...activity,
+              status: 'failed',
+              result_summary: 'The operation could not be completed.',
+            }
+          : activity
+      )
+    );
+  };
+
+  const isAbortError = (error: unknown) =>
+    error instanceof DOMException && error.name === 'AbortError';
+
   const handleResetThread = () => {
+    streamAbortRef.current?.abort();
+    streamAbortRef.current = null;
+    clearActivityTimers();
     const newThread = `thread_${Math.random().toString(36).substring(2, 10)}`;
     setThreadId(newThread);
     setMessages([]);
@@ -150,6 +225,8 @@ export const App: React.FC = () => {
     setFinalizationError(null);
     setSubmissionResult(null);
     setResolutionResult(null);
+    setTransientActivities([]);
+    setActivitiesFading(false);
   };
 
   const handleSendMessage = async (
@@ -166,15 +243,20 @@ export const App: React.FC = () => {
 
     setMessages((prev) => [...prev, userMsg]);
     setIsSending(true);
+    const controller = beginActivityStream();
 
     try {
-      const response = await chatApi.sendMessage(
+      const response = await chatApi.streamMessage(
         {
           thread_id: threadId,
           message: content,
           requirement_override: requirementOverride,
         },
-        userContext
+        userContext,
+        {
+          signal: controller.signal,
+          onActivity: handleStreamActivity,
+        }
       );
 
       if (response.message) {
@@ -189,10 +271,16 @@ export const App: React.FC = () => {
 
       // Re-fetch backend state snapshot to rehydrate all components
       await refreshState();
+      scheduleActivityFade();
     } catch (err: unknown) {
+      if (isAbortError(err)) return;
       console.error('Failed to send message:', err);
+      markRunningActivitiesFailed();
       setErrorMessage(getApiErrorMessage(err, 'Failed to send message'));
     } finally {
+      if (streamAbortRef.current === controller) {
+        streamAbortRef.current = null;
+      }
       setIsSending(false);
     }
   };
@@ -200,11 +288,16 @@ export const App: React.FC = () => {
   const handleConfirmSpecifications = async () => {
     setErrorMessage(null);
     setIsConfirming(true);
+    const controller = beginActivityStream();
 
     try {
-      const result = await requestsApi.confirmSpecifications(
+      const result = await requestsApi.streamConfirmSpecifications(
         threadId,
-        userContext
+        userContext,
+        {
+          signal: controller.signal,
+          onActivity: handleStreamActivity,
+        }
       );
 
       if (result.message) {
@@ -219,12 +312,18 @@ export const App: React.FC = () => {
 
       // Rehydrate full state
       await refreshState();
+      scheduleActivityFade();
     } catch (err: unknown) {
+      if (isAbortError(err)) return;
       console.error('Failed to confirm specifications:', err);
+      markRunningActivitiesFailed();
       setErrorMessage(
         getApiErrorMessage(err, 'Failed to confirm specifications')
       );
     } finally {
+      if (streamAbortRef.current === controller) {
+        streamAbortRef.current = null;
+      }
       setIsConfirming(false);
     }
   };
@@ -418,6 +517,8 @@ export const App: React.FC = () => {
                 prArtifact={requestState?.pr}
                 showConfirmPrompt={showConfirmPrompt}
                 onConfirmSpecifications={handleConfirmSpecifications}
+                transientActivities={transientActivities}
+                activitiesFading={activitiesFading}
                 activeAgentLabel={
                   requestState?.next_agent === 'Demand'
                     ? 'ProcureAI is analyzing warehouse inventory & assets...'

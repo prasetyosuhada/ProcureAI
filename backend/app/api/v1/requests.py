@@ -1,13 +1,16 @@
 import datetime
 import uuid
 import logging
+import asyncio
 from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, HumanMessage
 from app.schemas.user_context import UserContext
 from app.api.deps import get_current_user_context
 from app.agent.graph import get_compiled_procure_graph
 from app.agent.state import create_initial_graph_state
+from app.api.streaming import STREAM_HEADERS, encode_sse
 from app.schemas.requests import (
     RecommendationActionRequest,
     ConfirmSpecificationsResponse,
@@ -27,6 +30,42 @@ def _get_request_outcome(values: Dict[str, Any]) -> str:
     """Read new lifecycle state without breaking checkpoints created before the field existed."""
     outcome = values.get("request_outcome", "open")
     return "open" if outcome is None else outcome
+
+
+def _build_confirmation_input(user_context: UserContext) -> Dict[str, Any]:
+    return {
+        "messages": [HumanMessage(content="Specifications confirmed.")],
+        "confirmation_action": True,
+        "user_context": user_context.model_dump(),
+    }
+
+
+def _build_confirmation_response(
+    thread_id: str,
+    result: Dict[str, Any],
+) -> ConfirmSpecificationsResponse:
+    ai_msg = "Specifications confirmed. Proceeding to Demand Analysis."
+    for message in reversed(result.get("messages", [])):
+        if (
+            getattr(message, "type", None) == "ai"
+            or getattr(message, "role", None) == "assistant"
+        ):
+            ai_msg = str(message.content)
+            break
+
+    is_confirmed = (
+        result.get("next_agent") == "Demand"
+        or result.get("progress", {}).get("clarification") == "complete"
+    )
+    return ConfirmSpecificationsResponse(
+        thread_id=thread_id,
+        is_confirmed=is_confirmed,
+        message=ai_msg,
+        next_agent=result.get("next_agent", "Clarification"),
+        pr=result.get("pr", {}),
+        progress=result.get("progress", {}),
+        attention_items=result.get("attention_items", []),
+    )
 
 
 # ==============================================================================
@@ -117,41 +156,73 @@ async def confirm_specifications(
         graph = await get_compiled_procure_graph()
         config = {"configurable": {"thread_id": id}}
 
-        input_payload = {
-            "messages": [HumanMessage(content="Specifications confirmed.")],
-            "confirmation_action": True,
-            "user_context": user_context.model_dump()
-        }
+        input_payload = _build_confirmation_input(user_context)
 
         result = await graph.ainvoke(input_payload, config=config)
-
-        # Extract last AI message content
-        ai_msg = "Specifications confirmed. Proceeding to Demand Analysis."
-        for m in reversed(result.get("messages", [])):
-            if getattr(m, "type", None) == "ai" or getattr(m, "role", None) == "assistant":
-                ai_msg = str(m.content)
-                break
-
-        is_confirmed = (
-            result.get("next_agent") == "Demand" 
-            or result.get("progress", {}).get("clarification") == "complete"
-        )
-
-        return ConfirmSpecificationsResponse(
-            thread_id=id,
-            is_confirmed=is_confirmed,
-            message=ai_msg,
-            next_agent=result.get("next_agent", "Clarification"),
-            pr=result.get("pr", {}),
-            progress=result.get("progress", {}),
-            attention_items=result.get("attention_items", [])
-        )
+        return _build_confirmation_response(id, result)
     except Exception as e:
         logger.error(f"Error confirming specifications for thread {id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to confirm specifications for thread {id}"
         )
+
+
+@router.post("/{id}/confirm-specifications/stream", response_class=StreamingResponse)
+async def stream_confirm_specifications(
+    id: str,
+    user_context: UserContext = Depends(get_current_user_context),
+) -> StreamingResponse:
+    """Stream clarification and demand activity, followed by the normal response."""
+    run_id = f"run_{uuid.uuid4().hex[:12]}"
+    graph = await get_compiled_procure_graph()
+    config = {"configurable": {"thread_id": id}}
+    input_payload = _build_confirmation_input(user_context)
+
+    async def event_stream():
+        graph_result: Dict[str, Any] | None = None
+        try:
+            async for part in graph.astream(
+                input_payload,
+                config=config,
+                stream_mode=["custom", "values"],
+                version="v2",
+            ):
+                if part["type"] == "custom":
+                    event = dict(part["data"])
+                    event["run_id"] = run_id
+                    yield encode_sse(event)
+                elif part["type"] == "values":
+                    graph_result = part["data"]
+
+            if graph_result is None:
+                raise RuntimeError("Graph stream completed without a final state")
+
+            response = _build_confirmation_response(id, graph_result)
+            yield encode_sse({
+                "type": "result",
+                "run_id": run_id,
+                "data": response.model_dump(mode="json"),
+            })
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.error(
+                "Error streaming confirmation for thread %s",
+                id,
+                exc_info=True,
+            )
+            yield encode_sse({
+                "type": "error",
+                "run_id": run_id,
+                "detail": f"Failed to confirm specifications for thread {id}",
+            })
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers=STREAM_HEADERS,
+    )
 
 
 # ==============================================================================
