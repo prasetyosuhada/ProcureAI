@@ -14,12 +14,19 @@ from app.schemas.requests import (
     ResolveAttentionResponse,
     SubmitPRRequest,
     SubmitPRResponse,
+    ResolveWithoutPurchaseResponse,
     RequestStateResponse,
 )
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/requests", tags=["Procurement Requests"])
+
+
+def _get_request_outcome(values: Dict[str, Any]) -> str:
+    """Read new lifecycle state without breaking checkpoints created before the field existed."""
+    outcome = values.get("request_outcome", "open")
+    return "open" if outcome is None else outcome
 
 
 # ==============================================================================
@@ -49,6 +56,10 @@ async def get_request_state(
                 agent_activity=initial["agent_activity"],
                 attention_items=initial["attention_items"],
                 recommendation_status=initial["recommendation_status"],
+                request_outcome=initial["request_outcome"],
+                resolution_provenance=initial["resolution_provenance"],
+                resolution_reason=initial["resolution_reason"],
+                resolved_at=initial["resolved_at"],
                 messages=[],
                 last_message=None,
                 next_agent=initial["next_agent"]
@@ -74,6 +85,10 @@ async def get_request_state(
             agent_activity=vals.get("agent_activity", []),
             attention_items=vals.get("attention_items", []),
             recommendation_status=vals.get("recommendation_status", "none"),
+            request_outcome=_get_request_outcome(vals),
+            resolution_provenance=vals.get("resolution_provenance"),
+            resolution_reason=vals.get("resolution_reason"),
+            resolved_at=vals.get("resolved_at"),
             messages=serialized_messages,
             last_message=last_msg,
             next_agent=vals.get("next_agent", "Clarification")
@@ -175,6 +190,7 @@ async def handle_recommendation_action(
         current_vals = dict(snapshot.values)
         current_demand = current_vals.get("demand")
         current_pr = dict(current_vals.get("pr") or {})
+        current_outcome = _get_request_outcome(current_vals)
 
         # Guard 1: Demand Analysis must have been performed before acting on recommendation
         if current_demand is None:
@@ -183,11 +199,11 @@ async def handle_recommendation_action(
                 detail="No demand analysis available yet. Cannot act on recommendation before Demand Analysis is performed."
             )
 
-        # Guard 2: Requisition already submitted cannot be modified
-        if current_pr.get("status") == "submitted":
+        # Guard 2: A terminal request cannot receive another recommendation decision.
+        if current_pr.get("status") in {"submitted", "not_required"} or current_outcome != "open":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot modify recommendation: Purchase Requisition has already been submitted."
+                detail="Cannot modify recommendation: Request has already been finalized."
             )
 
         updated_demand = dict(current_demand)
@@ -206,7 +222,13 @@ async def handle_recommendation_action(
                     detail="Purchase quantity ('net_new_purchase') cannot be negative."
                 )
 
-            notes = payload.modification.user_notes or "Manually adjusted by user"
+            raw_notes = payload.modification.user_notes
+            if new_qty == 0 and (not raw_notes or not raw_notes.strip()):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Modification notes are required when setting purchase quantity to zero."
+                )
+            notes = raw_notes.strip() if raw_notes and raw_notes.strip() else "Manually adjusted by user"
 
             updated_demand["net_new_purchase"] = new_qty
             updated_demand["is_manually_overridden"] = True
@@ -279,6 +301,7 @@ async def handle_recommendation_action(
             current_pr["status"] = "rejected"
             patch = {
                 "recommendation_status": "rejected",
+                "request_outcome": "rejected",
                 "progress": {
                     "validation": "blocked",
                     "ready_for_submission": "blocked"
@@ -312,6 +335,10 @@ async def handle_recommendation_action(
             agent_activity=updated_vals.get("agent_activity", []),
             attention_items=updated_vals.get("attention_items", []),
             recommendation_status=updated_vals.get("recommendation_status", "none"),
+            request_outcome=_get_request_outcome(updated_vals),
+            resolution_provenance=updated_vals.get("resolution_provenance"),
+            resolution_reason=updated_vals.get("resolution_reason"),
+            resolved_at=updated_vals.get("resolved_at"),
             messages=serialized_messages,
             last_message=last_msg,
             next_agent=updated_vals.get("next_agent", "Clarification")
@@ -391,7 +418,172 @@ async def resolve_attention_item(
 
 
 # ==============================================================================
-# 5. POST /api/v1/requests/{id}/submit
+# 5. POST /api/v1/requests/{id}/resolve-without-purchase
+# ==============================================================================
+@router.post("/{id}/resolve-without-purchase", response_model=ResolveWithoutPurchaseResponse)
+async def resolve_without_purchase(
+    id: str,
+    user_context: UserContext = Depends(get_current_user_context),
+) -> ResolveWithoutPurchaseResponse:
+    """
+    Finalizes a reviewed request without creating an ERP Purchase Requisition.
+
+    Guards:
+    - Guard 1: The request thread must exist.
+    - Guard 2: The request must not already be submitted, resolved, or otherwise finalized.
+    - Guard 3: The recommendation must have an explicit user decision.
+    - Guard 4: Both final PR quantity and net-new purchase quantity must be zero.
+    - Guard 5: No unresolved blocking attention items may remain.
+    - Guard 6: The decision provenance must be internally consistent and auditable.
+    """
+    try:
+        graph = await get_compiled_procure_graph()
+        config = {"configurable": {"thread_id": id}}
+        snapshot = await graph.aget_state(config)
+
+        # Guard 1: A missing thread is not a legacy checkpoint.
+        if not snapshot or not snapshot.values:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Procurement request thread '{id}' not found."
+            )
+
+        vals = snapshot.values
+        pr_data = dict(vals.get("pr") or {})
+        demand_data = dict(vals.get("demand") or {})
+        progress_data = dict(vals.get("progress") or {})
+        attention_items = vals.get("attention_items", [])
+        rec_status = vals.get("recommendation_status", "none")
+        current_outcome = _get_request_outcome(vals)
+
+        # Guard 2: Duplicate and cross-finalization protection.
+        if pr_data.get("status") in {"submitted", "not_required"} or current_outcome != "open":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot resolve without purchase: Request already finalized."
+            )
+
+        # Guard 3: Human review is mandatory before finalization.
+        valid_recommendation_statuses = {"accepted", "kept_original", "modified"}
+        if rec_status not in valid_recommendation_statuses:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Cannot resolve without purchase: Recommendation status is '{rec_status}'. "
+                    "You must review the recommendation before finalizing the request."
+                )
+            )
+
+        # Guard 4: The zero-purchase branch requires both quantities to agree exactly.
+        pr_quantity = pr_data.get("quantity")
+        demand_quantity = demand_data.get("net_new_purchase")
+        if pr_quantity != 0 or demand_quantity != 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Cannot resolve without purchase: "
+                    f"PR quantity is {pr_quantity!r} and net new purchase quantity is {demand_quantity!r}; "
+                    "both must be 0."
+                )
+            )
+
+        # Guard 5: Finalization cannot bypass unresolved blocking issues.
+        unresolved_blocking = [
+            item for item in attention_items
+            if item.get("severity") == "blocking" and not item.get("resolved")
+        ]
+        if unresolved_blocking:
+            blocking_messages = "; ".join(
+                f"{item['id']}: {item['message']}" for item in unresolved_blocking
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Cannot resolve without purchase: Unresolved blocking attention items present: "
+                    f"{blocking_messages}"
+                )
+            )
+
+        # Guard 6: Record whether zero came from AI analysis or a reasoned user override.
+        if rec_status == "accepted":
+            if demand_data.get("is_manually_overridden", False):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        "Cannot resolve without purchase: Accepted recommendation is marked as a manual override."
+                    )
+                )
+            provenance = "demand_analysis"
+            resolution_reason = (
+                str(demand_data.get("justification") or "").strip()
+                or "Demand analysis determined that no new purchase is required."
+            )
+        elif rec_status == "modified":
+            override_reason = str(demand_data.get("override_reason") or "").strip()
+            if not demand_data.get("is_manually_overridden") or not override_reason:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        "Cannot resolve without purchase: Modified zero quantity requires a manual override reason."
+                    )
+                )
+            provenance = "user_override"
+            resolution_reason = override_reason
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Cannot resolve without purchase: Keeping the original requested quantity at zero "
+                    "is an invalid request state."
+                )
+            )
+
+        resolved_at = datetime.datetime.utcnow().isoformat()
+        completion_message = (
+            "No new purchase is required based on the reviewed demand analysis. "
+            "This request has been completed without creating or submitting a PR to ERP."
+        )
+        patch = {
+            "request_outcome": "resolved_without_purchase",
+            "resolution_provenance": provenance,
+            "resolution_reason": resolution_reason,
+            "resolved_at": resolved_at,
+            "pr": {"status": "not_required"},
+            "progress": {
+                "validation": "complete",
+                "ready_for_submission": "not_required",
+            },
+            "messages": [AIMessage(content=f"✅ {completion_message}")],
+        }
+        await graph.aupdate_state(config, patch)
+
+        updated_snapshot = await graph.aget_state(config)
+        updated_vals = updated_snapshot.values
+
+        return ResolveWithoutPurchaseResponse(
+            thread_id=id,
+            request_outcome="resolved_without_purchase",
+            resolution_provenance=provenance,
+            resolution_reason=resolution_reason,
+            resolved_at=resolved_at,
+            message=completion_message,
+            recommendation_status=updated_vals.get("recommendation_status", rec_status),
+            pr=updated_vals.get("pr", {**pr_data, "status": "not_required"}),
+            demand=updated_vals.get("demand", demand_data),
+            progress=updated_vals.get("progress", progress_data),
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error resolving request {id} without purchase: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to resolve procurement request {id} without purchase"
+        )
+
+
+# ==============================================================================
+# 6. POST /api/v1/requests/{id}/submit
 # ==============================================================================
 @router.post("/{id}/submit", response_model=SubmitPRResponse)
 async def submit_purchase_requisition(
@@ -422,6 +614,14 @@ async def submit_purchase_requisition(
         progress_data = dict(vals.get("progress") or {})
         attention_items = vals.get("attention_items", [])
         rec_status = vals.get("recommendation_status", "none")
+        current_outcome = _get_request_outcome(vals)
+
+        # Cross-finalization guard: a no-purchase resolution can never enter ERP submission.
+        if pr_data.get("status") == "not_required" or current_outcome == "resolved_without_purchase":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot submit PR: Request was already resolved without purchase."
+            )
 
         # Guard 1: Check for unresolved blocking attention items
         unresolved_blocking = [
@@ -455,7 +655,7 @@ async def submit_purchase_requisition(
             )
 
         # Guard 4: Prevent duplicate submission
-        if pr_data.get("status") == "submitted":
+        if pr_data.get("status") == "submitted" or current_outcome == "purchase_submitted":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Cannot submit PR: Requisition {pr_data.get('pr_number', '')} has already been submitted."
@@ -478,6 +678,7 @@ async def submit_purchase_requisition(
         patch = {
             "pr": pr_data,
             "progress": progress_data,
+            "request_outcome": "purchase_submitted",
             "messages": [
                 AIMessage(
                     content=f"🎉 **Purchase Requisition {pr_number} Submitted Successfully!**\n\n"
@@ -495,7 +696,8 @@ async def submit_purchase_requisition(
             submitted_at=submitted_at,
             message=f"Purchase Requisition {pr_number} successfully submitted.",
             pr=pr_data,
-            progress=progress_data
+            progress=progress_data,
+            request_outcome="purchase_submitted",
         )
     except HTTPException:
         raise

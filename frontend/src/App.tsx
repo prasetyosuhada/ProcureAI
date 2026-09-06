@@ -14,7 +14,11 @@ import { UserContext, ChatMessage } from './types/chat';
 import { RecommendationActionPayload } from './types/requests';
 import { useRequestState } from './hooks/useRequestState';
 import { chatApi } from './api/chatApi';
-import { requestsApi, SubmitPRResponse } from './api/requestsApi';
+import {
+  requestsApi,
+  ResolveWithoutPurchaseResponse,
+  SubmitPRResponse,
+} from './api/requestsApi';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 
 interface ApiErrorResponse {
@@ -69,10 +73,12 @@ export const App: React.FC = () => {
   const [resolvingAttentionId, setResolvingAttentionId] = useState<
     string | null
   >(null);
-  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
-  const [submissionError, setSubmissionError] = useState<string | null>(null);
+  const [isFinalizing, setIsFinalizing] = useState<boolean>(false);
+  const [finalizationError, setFinalizationError] = useState<string | null>(null);
   const [submissionResult, setSubmissionResult] =
     useState<SubmitPRResponse | null>(null);
+  const [resolutionResult, setResolutionResult] =
+    useState<ResolveWithoutPurchaseResponse | null>(null);
 
   // Phase 1 State Hydration Hook
   const {
@@ -119,8 +125,9 @@ export const App: React.FC = () => {
     setErrorMessage(null);
     setProcessingRecommendation(null);
     setResolvingAttentionId(null);
-    setSubmissionError(null);
+    setFinalizationError(null);
     setSubmissionResult(null);
+    setResolutionResult(null);
   };
 
   const handleSendMessage = async (
@@ -204,7 +211,7 @@ export const App: React.FC = () => {
     payload: RecommendationActionPayload
   ) => {
     setErrorMessage(null);
-    setSubmissionError(null);
+    setFinalizationError(null);
     setProcessingRecommendation(payload.action);
 
     try {
@@ -240,8 +247,8 @@ export const App: React.FC = () => {
   };
 
   const handleSubmitPR = async () => {
-    setSubmissionError(null);
-    setIsSubmitting(true);
+    setFinalizationError(null);
+    setIsFinalizing(true);
 
     try {
       const result = await requestsApi.submitPR(
@@ -253,11 +260,32 @@ export const App: React.FC = () => {
       await refreshState();
     } catch (err: unknown) {
       console.error('Failed to submit PR:', err);
-      setSubmissionError(
+      setFinalizationError(
         getApiErrorMessage(err, 'Failed to submit Purchase Requisition')
       );
     } finally {
-      setIsSubmitting(false);
+      setIsFinalizing(false);
+    }
+  };
+
+  const handleResolveWithoutPurchase = async () => {
+    setFinalizationError(null);
+    setIsFinalizing(true);
+
+    try {
+      const result = await requestsApi.resolveWithoutPurchase(
+        threadId,
+        userContext
+      );
+      setResolutionResult(result);
+      await refreshState();
+    } catch (err: unknown) {
+      console.error('Failed to resolve request without purchase:', err);
+      setFinalizationError(
+        getApiErrorMessage(err, 'Failed to complete request without purchase')
+      );
+    } finally {
+      setIsFinalizing(false);
     }
   };
 
@@ -265,7 +293,8 @@ export const App: React.FC = () => {
   const currentPhase =
     requestState?.next_agent === 'Demand'
       ? 'Demand'
-      : requestState?.progress?.ready_for_submission === 'complete'
+      : requestState?.progress?.ready_for_submission === 'complete' ||
+        requestState?.progress?.ready_for_submission === 'not_required'
       ? 'Completed'
       : requestState?.progress?.clarification === 'complete'
       ? 'GeneratePR'
@@ -415,10 +444,13 @@ export const App: React.FC = () => {
                 recommendationStatus={
                   requestState?.recommendation_status || 'none'
                 }
-                isSubmitting={isSubmitting}
-                submitError={submissionError}
+                requestOutcome={requestState?.request_outcome || 'open'}
+                isFinalizing={isFinalizing}
+                finalizationError={finalizationError}
                 submitResult={submissionResult}
+                resolutionResult={resolutionResult}
                 onSubmit={handleSubmitPR}
+                onResolveWithoutPurchase={handleResolveWithoutPurchase}
               />
             )}
           </div>

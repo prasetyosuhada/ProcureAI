@@ -123,6 +123,12 @@ export const RequestProgressStepper: React.FC<RequestProgressStepperProps> = ({
             <AlertCircle className="w-4 h-4 text-rose-400" />
           </div>
         );
+      case 'not_required':
+        return (
+          <div className="w-8 h-8 rounded-full bg-cyan-500/20 border border-cyan-500/50 flex items-center justify-center text-cyan-400 shadow-sm shadow-cyan-500/20">
+            <CheckCircle2 className="w-4 h-4 text-cyan-400" />
+          </div>
+        );
       case 'pending':
       default:
         return (
@@ -153,6 +159,12 @@ export const RequestProgressStepper: React.FC<RequestProgressStepperProps> = ({
             Blocked
           </span>
         );
+      case 'not_required':
+        return (
+          <span className="text-[10px] uppercase font-bold tracking-wider text-cyan-400 bg-cyan-500/10 px-1.5 py-0.5 rounded border border-cyan-500/20">
+            Not Required
+          </span>
+        );
       case 'pending':
       default:
         return (
@@ -171,7 +183,7 @@ export const RequestProgressStepper: React.FC<RequestProgressStepperProps> = ({
         {STEPS.map((step, idx) => {
           const status = progress[step.key] || 'pending';
           const isLast = idx === STEPS.length - 1;
-          const isLineActive = status === 'complete';
+          const isLineActive = status === 'complete' || status === 'not_required';
 
           return (
             <React.Fragment key={step.key}>
@@ -188,6 +200,8 @@ export const RequestProgressStepper: React.FC<RequestProgressStepperProps> = ({
                           ? 'text-slate-200'
                           : status === 'blocked'
                           ? 'text-rose-300'
+                          : status === 'not_required'
+                          ? 'text-cyan-300'
                           : 'text-slate-500'
                       }`}
                     >
@@ -195,7 +209,9 @@ export const RequestProgressStepper: React.FC<RequestProgressStepperProps> = ({
                     </span>
                     {getStatusBadge(status)}
                   </div>
-                  <span className="text-[11px] text-slate-400">{step.subtitle}</span>
+                  <span className="text-[11px] text-slate-400">
+                    {status === 'not_required' ? 'No PR Needed' : step.subtitle}
+                  </span>
                 </div>
               </div>
 

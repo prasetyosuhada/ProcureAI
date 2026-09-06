@@ -6,6 +6,10 @@ import {
   RequestStateResponse,
   RecommendationActionPayload,
   RequestProgress,
+  RequestOutcome,
+  ResolutionProvenance,
+  DemandBreakdown,
+  RecommendationStatus,
 } from '../types/requests';
 
 export interface ConfirmSpecificationsResponse {
@@ -33,6 +37,20 @@ export interface SubmitPRResponse {
   submitted_at: string;
   message: string;
   pr: PRArtifact;
+  progress: RequestProgress;
+  request_outcome: RequestOutcome;
+}
+
+export interface ResolveWithoutPurchaseResponse {
+  thread_id: string;
+  request_outcome: 'resolved_without_purchase';
+  resolution_provenance: ResolutionProvenance;
+  resolution_reason: string;
+  resolved_at: string;
+  message: string;
+  recommendation_status: RecommendationStatus;
+  pr: PRArtifact;
+  demand: DemandBreakdown;
   progress: RequestProgress;
 }
 
@@ -117,6 +135,21 @@ export const requestsApi = {
     const response = await apiClient.post<SubmitPRResponse>(
       `/requests/${threadId}/submit`,
       { notes },
+      { headers: buildHeaders(userContext) }
+    );
+    return response.data;
+  },
+
+  /**
+   * Completes a reviewed zero-quantity request without creating an ERP PR.
+   */
+  async resolveWithoutPurchase(
+    threadId: string,
+    userContext?: UserContext
+  ): Promise<ResolveWithoutPurchaseResponse> {
+    const response = await apiClient.post<ResolveWithoutPurchaseResponse>(
+      `/requests/${threadId}/resolve-without-purchase`,
+      {},
       { headers: buildHeaders(userContext) }
     );
     return response.data;

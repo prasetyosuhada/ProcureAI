@@ -182,7 +182,7 @@ export const RecommendationCard: React.FC<RecommendationCardProps> = ({
             <p className="mt-0.5 text-[11px] opacity-80">
               {recommendationStatus === 'rejected'
                 ? `The PR remains at the original ${demand.requested_qty} units and cannot be submitted.`
-                : `Final PR quantity: ${demand.net_new_purchase} units.`}
+                : `Final purchase quantity: ${demand.net_new_purchase} units.`}
             </p>
             {demand.override_reason &&
               ['modified', 'kept_original'].includes(recommendationStatus) && (

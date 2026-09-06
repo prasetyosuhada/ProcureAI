@@ -44,6 +44,7 @@ export const PRArtifactCard: React.FC<PRArtifactCardProps> = ({
   }
 
   const isSubmitted = pr.status === 'submitted';
+  const isNotRequired = pr.status === 'not_required';
   const hasSpecs = pr.specifications && pr.specifications.length > 0;
 
   return (
@@ -79,6 +80,8 @@ export const PRArtifactCard: React.FC<PRArtifactCardProps> = ({
           className={`text-[10px] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-full border flex items-center gap-1 ${
             isSubmitted
               ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+              : isNotRequired
+              ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30'
               : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30'
           }`}
         >
@@ -86,6 +89,11 @@ export const PRArtifactCard: React.FC<PRArtifactCardProps> = ({
             <>
               <CheckCircle2 className="w-3 h-3" />
               Submitted
+            </>
+          ) : isNotRequired ? (
+            <>
+              <CheckCircle2 className="w-3 h-3" />
+              No Purchase Required
             </>
           ) : (
             <>

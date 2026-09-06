@@ -1,6 +1,8 @@
-export type StageStatus = 'pending' | 'in_progress' | 'complete' | 'blocked';
+export type StageStatus = 'pending' | 'in_progress' | 'complete' | 'blocked' | 'not_required';
 
 export type RecommendationStatus = 'none' | 'pending_review' | 'accepted' | 'modified' | 'kept_original' | 'rejected';
+export type RequestOutcome = 'open' | 'purchase_submitted' | 'resolved_without_purchase' | 'rejected';
+export type ResolutionProvenance = 'demand_analysis' | 'user_override';
 
 export interface RequestProgress {
   clarification: StageStatus;
@@ -64,6 +66,10 @@ export interface RequestStateResponse {
   agent_activity: AgentAction[];
   attention_items: AttentionItem[];
   recommendation_status: RecommendationStatus;
+  request_outcome: RequestOutcome;
+  resolution_provenance?: ResolutionProvenance | null;
+  resolution_reason?: string | null;
+  resolved_at?: string | null;
   messages: Array<{
     role: 'user' | 'assistant' | 'system';
     content: string;

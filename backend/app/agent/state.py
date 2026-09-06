@@ -6,8 +6,10 @@ from pydantic import BaseModel, Field, ConfigDict
 # ==============================================================================
 # 1. Stage & Progress Types
 # ==============================================================================
-StageStatus = Literal["pending", "in_progress", "complete", "blocked"]
+StageStatus = Literal["pending", "in_progress", "complete", "blocked", "not_required"]
 RecommendationStatus = Literal["none", "pending_review", "accepted", "modified", "kept_original", "rejected"]
+RequestOutcome = Literal["open", "purchase_submitted", "resolved_without_purchase", "rejected"]
+ResolutionProvenance = Literal["demand_analysis", "user_override"]
 
 class RequestProgress(BaseModel):
     clarification: StageStatus = Field(default="pending", description="Status tahap klarifikasi kebutuhan")
@@ -287,6 +289,10 @@ class ProcureAIState(TypedDict):
     agent_activity: Annotated[List[Dict[str, Any]], reduce_agent_activity]
     attention_items: Annotated[List[Dict[str, Any]], reduce_attention_items]
     recommendation_status: RecommendationStatus
+    request_outcome: RequestOutcome
+    resolution_provenance: Optional[ResolutionProvenance]
+    resolution_reason: Optional[str]
+    resolved_at: Optional[str]
     confirmation_action: Annotated[bool, reduce_confirmation_action]
     next_agent: Literal["Clarification", "Demand", "GeneratePR", "End"]
 
@@ -319,6 +325,10 @@ def create_initial_graph_state(user_context_dict: Dict[str, Any]) -> ProcureAISt
         "agent_activity": [],
         "attention_items": [],
         "recommendation_status": "none",
+        "request_outcome": "open",
+        "resolution_provenance": None,
+        "resolution_reason": None,
+        "resolved_at": None,
         "confirmation_action": False,
         "next_agent": "Clarification",
         "requirement_draft": RequirementDraftSchema().model_dump(),

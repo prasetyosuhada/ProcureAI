@@ -1,7 +1,7 @@
 import datetime
 from typing import Optional, List, Dict, Any, Literal
 from pydantic import BaseModel, Field, ConfigDict
-from app.agent.state import RecommendationStatus
+from app.agent.state import RecommendationStatus, RequestOutcome, ResolutionProvenance
 
 class RecommendationModificationSchema(BaseModel):
     net_new_purchase: Optional[int] = Field(
@@ -70,6 +70,20 @@ class SubmitPRResponse(BaseModel):
     message: str
     pr: Dict[str, Any]
     progress: Dict[str, Any]
+    request_outcome: RequestOutcome
+
+
+class ResolveWithoutPurchaseResponse(BaseModel):
+    thread_id: str
+    request_outcome: Literal["resolved_without_purchase"]
+    resolution_provenance: ResolutionProvenance
+    resolution_reason: str
+    resolved_at: str
+    message: str
+    recommendation_status: RecommendationStatus
+    pr: Dict[str, Any]
+    demand: Dict[str, Any]
+    progress: Dict[str, Any]
 
 
 class RequestStateResponse(BaseModel):
@@ -80,6 +94,10 @@ class RequestStateResponse(BaseModel):
     agent_activity: List[Dict[str, Any]] = Field(default_factory=list)
     attention_items: List[Dict[str, Any]] = Field(default_factory=list)
     recommendation_status: RecommendationStatus = "none"
+    request_outcome: RequestOutcome = "open"
+    resolution_provenance: Optional[ResolutionProvenance] = None
+    resolution_reason: Optional[str] = None
+    resolved_at: Optional[str] = None
     messages: List[Dict[str, Any]] = Field(default_factory=list)
     last_message: Optional[str] = None
     next_agent: str = "Clarification"

@@ -1,8 +1,14 @@
 import pytest
 from unittest.mock import AsyncMock, patch
+from fastapi import HTTPException
 from httpx import AsyncClient, ASGITransport
 from main import app
-from app.api.v1.requests import handle_recommendation_action
+from app.api.v1.requests import (
+    get_request_state,
+    handle_recommendation_action,
+    resolve_without_purchase,
+    submit_purchase_requisition,
+)
 from app.schemas.requests import RecommendationActionRequest
 from app.schemas.user_context import UserContext
 
@@ -19,6 +25,7 @@ async def test_get_request_state_new_and_populated():
         assert data1["progress"]["clarification"] == "in_progress"
         assert data1["pr"]["status"] == "draft"
         assert data1["demand"] is None
+        assert data1["request_outcome"] == "open"
         assert data1["messages"] == []
 
         # 2. Populate thread with a chat message
@@ -201,6 +208,7 @@ async def test_recommendation_reject_restores_requested_quantity_and_blocks_pr()
     assert result.pr["quantity"] == 10
     assert result.pr["status"] == "rejected"
     assert result.recommendation_status == "rejected"
+    assert result.request_outcome == "rejected"
     assert result.progress["validation"] == "blocked"
     assert result.progress["ready_for_submission"] == "blocked"
 
@@ -351,6 +359,7 @@ async def test_submit_pr_with_guards():
         assert data["progress"]["ready_for_submission"] == "complete"
         assert data["pr"]["status"] == "submitted"
         assert data["pr"]["quantity"] == 2
+        assert data["request_outcome"] == "purchase_submitted"
 
 
 # ==============================================================================

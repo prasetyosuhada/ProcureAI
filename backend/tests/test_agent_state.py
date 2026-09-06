@@ -177,5 +177,9 @@ def test_create_initial_graph_state():
     assert state["agent_activity"] == []
     assert state["attention_items"] == []
     assert state["recommendation_status"] == "none"
+    assert state["request_outcome"] == "open"
+    assert state["resolution_provenance"] is None
+    assert state["resolution_reason"] is None
+    assert state["resolved_at"] is None
     assert state["confirmation_action"] is False
     assert state["next_agent"] == "Clarification"
