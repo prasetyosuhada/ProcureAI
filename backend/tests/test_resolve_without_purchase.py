@@ -370,9 +370,11 @@ async def test_positive_quantity_submit_still_succeeds_and_records_outcome():
 
 @pytest.mark.asyncio
 async def test_legacy_positive_state_without_outcome_can_still_submit():
-    graph = StatefulFakeGraph(
-        make_state(pr_quantity=2, demand_quantity=2, include_outcome=False)
+    state = make_state(
+        pr_quantity=2, demand_quantity=2, include_outcome=False
     )
+    assert "request_outcome" not in state
+    graph = StatefulFakeGraph(state)
 
     result = await call_with_graph(
         graph, submit_purchase_requisition, "thread_legacy_submit", None, USER
@@ -385,6 +387,7 @@ async def test_legacy_positive_state_without_outcome_can_still_submit():
 @pytest.mark.asyncio
 async def test_legacy_zero_state_without_outcome_can_still_resolve():
     state = make_state(include_outcome=False)
+    assert "request_outcome" not in state
     state["demand"].pop("justification")
     graph = StatefulFakeGraph(state)
 
