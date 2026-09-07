@@ -70,7 +70,11 @@ test('completes a fully covered monitor request without creating a PR', async ({
     /Completed/i
   );
   await expect(page.getByText('Agent Actions & Telemetry')).toBeVisible();
-  await expect(page.getByText('Awaiting Human Review', { exact: true })).toBeVisible();
+  await expect(
+    agentTeam.getByText('Waiting for human recommendation review', {
+      exact: true,
+    })
+  ).toBeVisible();
   await expect(page.getByText('GeneratePR Agent', { exact: true })).toHaveCount(0);
   await expect(
     recommendationCard.getByText('Recommended net new purchase', {
@@ -131,7 +135,11 @@ test('completes a fully covered monitor request without creating a PR', async ({
     page.getByText('Request completed without a new purchase')
   ).toBeVisible();
   await expect(page.getByText('No PR Needed')).toBeVisible();
-  await expect(page.getByText('Workflow Complete', { exact: true })).toBeVisible();
+  await expect(
+    agentTeam.getByText('Workflow finalized — no purchase required', {
+      exact: true,
+    })
+  ).toBeVisible();
   await expect(page.getByText('PR Number')).toHaveCount(0);
   expect(failedApiResponses).toEqual([]);
 

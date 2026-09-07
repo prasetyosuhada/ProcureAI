@@ -36,28 +36,6 @@ function getApiErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
-function getAssistantContextLabel(
-  nextAgent?: string,
-  requestOutcome?: string
-): string {
-  if (requestOutcome === 'rejected') return 'Request Paused';
-  if (
-    requestOutcome === 'purchase_submitted' ||
-    requestOutcome === 'resolved_without_purchase' ||
-    nextAgent === 'End'
-  ) {
-    return 'Workflow Complete';
-  }
-
-  const labels: Record<string, string> = {
-    Clarification: 'Requirement Clarification Agent',
-    Demand: 'Demand Analysis Agent',
-    GeneratePR: 'Awaiting Human Review',
-  };
-
-  return labels[nextAgent || 'Clarification'] || 'ProcureAI Workflow';
-}
-
 export const App: React.FC = () => {
   const [threadId, setThreadId] = useState<string>(() => {
     return (
@@ -494,19 +472,13 @@ export const App: React.FC = () => {
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-[580px] pb-6">
           {/* Left Column: Conversation Pane (Col span: 6/12) */}
           <div className="h-[150vh] min-h-[520px] lg:sticky lg:top-4 lg:col-span-6 lg:h-[calc(100vh-12rem)] lg:min-h-[580px] flex flex-col glass-panel rounded-2xl border border-slate-800/80 overflow-hidden shadow-xl shadow-black/40">
-            <div className="shrink-0 p-3.5 border-b border-slate-800/80 bg-slate-900/60 flex items-center justify-between">
+            <div className="shrink-0 p-3.5 border-b border-slate-800/80 bg-slate-900/60 flex items-center">
               <div className="flex items-center gap-2">
                 <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
                 <span className="text-sm font-semibold text-slate-200">
                   AI Procurement Assistant
                 </span>
               </div>
-              <span className="text-[11px] text-slate-400 font-mono">
-                {getAssistantContextLabel(
-                  requestState?.next_agent,
-                  requestState?.request_outcome
-                )}
-              </span>
             </div>
 
             {/* Chat Conversation View */}
